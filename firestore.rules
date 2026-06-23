@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidClient(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'address', 'wilaya', 'effectif', 'effectifType', 'nif', 'nis', 'rc', 'ai']) &&
+             data.keys().size() <= 12 &&
+             data.ownerId is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.address is string && data.address.size() <= 500 &&
+             data.wilaya is string && data.wilaya.size() <= 100 &&
+             data.effectif is number &&
+             data.effectifType in ['SALARIES', 'POSTES', 'ETUDIANTS'] &&
+             data.nif is string && data.nif.size() <= 50 &&
+             data.nis is string && data.nis.size() <= 50 &&
+             data.rc is string && data.rc.size() <= 50 &&
+             data.ai is string && data.ai.size() <= 50;
+    }
+
+    match /clients/{clientId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(clientId) && isValidClient(incoming());
+      allow update: if isSignedIn() && isValidId(clientId) && isValidClient(incoming());
+      allow delete: if isSignedIn() && isValidId(clientId);
+    }
+
+    function isDocTrack(docData) {
+      return docData is map &&
+             docData.keys().hasAny(['status']) &&
+             docData.status in ['MISSING', 'PREPARED', 'VALIDATED', 'DEPOSITED', 'RECUPERATED', 'IGNORED'];
+    }
+ 
+    function isValidProject(data) {
+      return data.keys().hasAll(['ownerId', 'clientId', 'product', 'name']) &&
+             data.ownerId is string &&
+             data.clientId is string && data.clientId.size() > 0 && data.clientId.size() <= 128 &&
+             data.product is string && data.product.size() > 0 && data.product.size() <= 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             
+             (!data.keys().hasAny(['acqProforma']) || isDocTrack(data.acqProforma)) &&
+             (!data.keys().hasAny(['acqSoumission']) || isDocTrack(data.acqSoumission)) &&
+             (!data.keys().hasAny(['acqConvention']) || isDocTrack(data.acqConvention)) &&
+             (!data.keys().hasAny(['acqBcOds']) || isDocTrack(data.acqBcOds)) &&
+             (!data.keys().hasAny(['acqFacture']) || isDocTrack(data.acqFacture)) &&
+             (!data.keys().hasAny(['acqServiceFait']) || isDocTrack(data.acqServiceFait)) &&
+             (!data.keys().hasAny(['acqAbe']) || isDocTrack(data.acqAbe)) &&
+             (!data.keys().hasAny(['acqEncaissement']) || (data.acqEncaissement is map && data.acqEncaissement.status in ['PENDING', 'DONE'])) &&
+             (!data.keys().hasAny(['maintenances']) || (data.maintenances is list && data.maintenances.size() <= 100)) &&
+             
+             // Optional fields validation
+             (!data.keys().hasAny(['version']) || data.version in ['ULTRALIGHT', 'LIGHT', 'INTERMEDIATE', 'ADVANCED', 'GLOBAL']) &&
+             (!data.keys().hasAny(['installationDate']) || (data.installationDate is string && data.installationDate.size() <= 50)) &&
+             (!data.keys().hasAny(['departement']) || (data.departement is string && data.departement.size() <= 200)) &&
+             (!data.keys().hasAny(['wilaya']) || (data.wilaya is string && data.wilaya.size() <= 100)) &&
+             (!data.keys().hasAny(['ville']) || (data.ville is string && data.ville.size() <= 100)) &&
+             (!data.keys().hasAny(['entity']) || data.entity in ['Naltis', 'Netsprint', 'MP']) &&
+             (!data.keys().hasAny(['technique']) || (data.technique is list && data.technique.size() <= 100)) &&
+             (!data.keys().hasAny(['mode']) || data.mode in ['Acquisition', 'Maintenance offerte', 'Maintenance']) &&
+             (!data.keys().hasAny(['phase']) || data.phase in ['Démarchage', 'Adaptation', 'Encaissement', 'Recouvrement']) &&
+             (!data.keys().hasAny(['status']) || data.status in ['Actif', 'Effectué', 'Suspendu', 'Abandonné']) &&
+             (!data.keys().hasAny(['createdAt']) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+             (!data.keys().hasAny(['contracts']) || (data.contracts is list && data.contracts.size() <= 100)) &&
+             (!data.keys().hasAny(['contacts']) || (data.contacts is list && data.contacts.size() <= 100)) &&
+             (!data.keys().hasAny(['documents']) || (data.documents is list && data.documents.size() <= 100)) &&
+             (!data.keys().hasAny(['history']) || (data.history is list && data.history.size() <= 1000));
+    }
+
+    match /projects/{projectId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(projectId) && isValidProject(incoming()) && 
+        exists(/databases/$(database)/documents/clients/$(incoming().clientId));
+      allow update: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
+      allow delete: if isSignedIn() && isValidId(projectId);
+    }
+
+    function isValidMission(data) {
+      return data.keys().hasAll(['ownerId', 'title', 'date', 'status', 'projectIds', 'itineraries']) &&
+             data.ownerId is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.date is string && data.date.size() <= 50 &&
+             data.status in ['PLANNED', 'IN_PROGRESS', 'COMPLETED'] &&
+             data.projectIds is list && data.projectIds.size() <= 100 &&
+             data.itineraries is list && data.itineraries.size() <= 100;
+    }
+
+    match /missions/{missionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(missionId) && isValidMission(incoming());
+      allow update: if isSignedIn() && isValidId(missionId) && isValidMission(incoming());
+      allow delete: if isSignedIn() && isValidId(missionId);
+    }
+  }
+}
