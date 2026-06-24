@@ -26,6 +26,7 @@ const TECH_COLLABS = ["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"];
 export default function ClientDetails() {
   const { id } = useParams<{ id: string }>();
   const { clients, projects, addProject, deleteProject, dossiersPaiement, addDossierPaiement, updateEncaissement } = useStore();
+  const [selectedFusionGroup, setSelectedFusionGroup] = useState<any[] | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectData, setNewProjectData] = useState({
     name: '',
@@ -84,19 +85,24 @@ export default function ClientDetails() {
   const combinableGroups = Object.entries(grouped).filter(([_, group]) => group.length >= 2);
 
   const handleCreateDossier = async (group: any[]) => {
-     const newId = crypto.randomUUID();
-     await addDossierPaiement({
-        clientId: client.id,
-        projectIds: Array.from(new Set(group.map(e => e.projectId))),
-        encaissementIds: group.map(e => e.id),
-        status: 'DRAFT',
-        total: 0,
-        encaisse: 0
-     });
-     
-     group.forEach(e => {
-        updateEncaissement(e.projectId, e.id, { isCombined: true, dossierId: newId });
-     });
+     try {
+       const newId = await addDossierPaiement({
+          clientId: client.id,
+          projectIds: Array.from(new Set(group.map(e => e.projectId))),
+          encaissementIds: group.map(e => e.id),
+          status: 'DRAFT',
+          total: 0,
+          encaisse: 0
+       });
+       
+       if (newId) {
+         group.forEach(e => {
+            updateEncaissement(e.projectId, e.id, { isCombined: true, dossierId: newId });
+         });
+       }
+     } catch (e) {
+       console.error("Erreur lors de la création du dossier", e);
+     }
   };
 
   const handleAddProject = (e: React.FormEvent) => {
@@ -168,31 +174,7 @@ export default function ClientDetails() {
 
   return (
     <div className="space-y-6">
-      {/* Alertes de fusion */}
-      {combinableGroups.length > 0 && (
-        <div className="space-y-4">
-          {combinableGroups.map(([monthYear, group]) => (
-            <div key={monthYear} className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-3xl p-6 text-white shadow-lg shadow-indigo-500/30 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
-              <div className="flex items-start gap-4 relative z-10">
-                 <div className="bg-white/20 p-3 rounded-2xl">
-                   <FolderKanban className="w-8 h-8 text-white" />
-                 </div>
-                 <div>
-                   <h3 className="text-lg font-black tracking-tight mb-1">Opportunité de Fusion !</h3>
-                   <p className="text-indigo-100 text-sm font-medium">Vous avez {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({group.map((g: any) => g.product).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
-                 </div>
-              </div>
-              <button 
-                onClick={() => handleCreateDossier(group)}
-                className="px-6 py-3 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl font-bold shadow-md whitespace-nowrap transition-transform hover:scale-105 relative z-10"
-              >
-                Créer le dossier fusionné
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+
 
       {/* Header section with back navigation */}
       <div className="flex flex-col gap-4">
@@ -200,10 +182,7 @@ export default function ClientDetails() {
           <ArrowLeft className="w-4 h-4" />
           Retour au portefeuille clients
         </Link>
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">Fiche Client</h2>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">Consultez les informations fiscales et l'historique des projets du client.</p>
-        </div>
+
       </div>
 
       {/* Main client info details box */}
@@ -244,25 +223,29 @@ export default function ClientDetails() {
       </div>
 
       {/* Projects listing grid */}
-      <div className="space-y-4">
-        <div className="bg-white/60 backdrop-blur-md rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/40 overflow-hidden flex flex-col">
-          <div className="px-6 py-5 border-b border-slate-200/40 bg-white/40 flex items-center justify-between relative z-10">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-widest flex items-center gap-2.5">
-              <FileText className="w-5 h-5 text-blue-600" />
+      <div className="mt-8 space-y-4">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="font-extrabold text-xl text-slate-900 flex items-center gap-3">
+              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-8 h-8 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
+                <FileText className="w-4 h-4 text-white" />
+              </div>
               Projets associés ({clientProjects.length})
             </h3>
-            {!showNewProject && (
-              <button 
-                onClick={() => setShowNewProject(true)}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold rounded-xl shadow-sm hover:opacity-95 transition-all duration-200"
-              >
-                <Plus className="w-3.5 h-3.5" /> Nouveau Projet
-              </button>
-            )}
+            <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Gérez et consultez tous les projets de ce client</p>
           </div>
+          {!showNewProject && (
+            <button 
+              onClick={() => setShowNewProject(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold rounded-xl shadow-sm hover:opacity-95 transition-all duration-200"
+            >
+              <Plus className="w-3.5 h-3.5" /> Nouveau Projet
+            </button>
+          )}
+        </div>
 
-          <div className="p-6">
-            {/* Grid display */}
+        <div>
+          {/* Grid display */}
             {clientProjects.length === 0 ? (
               <div className="text-center py-12 max-w-sm mx-auto text-slate-500">
                 <FileText className="w-10 h-10 text-slate-350 mx-auto mb-3" />
@@ -371,10 +354,32 @@ export default function ClientDetails() {
                 })}
               </div>
             )}
-          </div>
         </div>
       </div>
-
+      {/* Alertes de fusion repensées (Pastel & Discrètes) */}
+      {combinableGroups.length > 0 && (
+        <div className="space-y-3 mt-8">
+          {combinableGroups.map(([monthYear, group]) => (
+            <div key={monthYear} className="bg-gradient-to-r from-indigo-50/80 to-purple-50/80 border border-indigo-100/50 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-4 relative z-10 w-full">
+                 <div className="bg-white border border-indigo-100 p-2.5 rounded-xl shadow-sm shrink-0">
+                   <FolderKanban className="w-5 h-5 text-indigo-500" />
+                 </div>
+                 <div className="flex-1">
+                   <h3 className="text-base font-extrabold text-indigo-900 tracking-tight">Opportunité de Fusion !</h3>
+                   <p className="text-indigo-600/80 text-xs font-bold mt-0.5 leading-relaxed">Vous avez {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({group.map((g: any) => g.product).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
+                 </div>
+              </div>
+              <button 
+                onClick={() => setSelectedFusionGroup(group)}
+                className="px-6 py-2.5 bg-white text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 hover:border-transparent rounded-xl text-xs font-black shadow-sm whitespace-nowrap transition-all hover:scale-105 relative z-10"
+              >
+                Voir
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Liste des Encaissements Globaux du Client */}
       <div className="mt-8 space-y-4">
         <div className="flex justify-between items-center mb-6">
@@ -483,39 +488,65 @@ export default function ClientDetails() {
 
       {/* Dossiers de paiement (historique) */}
       {dossiersPaiement && dossiersPaiement.filter(d => d.clientId === id).length > 0 && (
-        <div className="bg-white/60 backdrop-blur-md rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/40 overflow-hidden flex flex-col mt-8">
-          <div className="px-6 py-5 border-b border-slate-200/40 bg-white/40 flex items-center justify-between relative z-10">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-widest flex items-center gap-2.5">
-              <FolderKanban className="w-5 h-5 text-purple-600" />
-              Dossiers de Paiement Combinés
-            </h3>
+        <div className="mt-8 space-y-4">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h3 className="font-extrabold text-xl text-slate-900 flex items-center gap-3">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-8 h-8 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
+                  <FolderKanban className="w-4 h-4 text-white" />
+                </div>
+                Dossiers d'encaissement
+              </h3>
+              <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Regroupements d'encaissements en un seul dossier</p>
+            </div>
           </div>
-          <div className="p-6">
+          <div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {dossiersPaiement.filter(d => d.clientId === id).map((dossier) => (
-                <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200">
-                      Dossier Fusionné
-                    </span>
-                    <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
-                  </div>
-                  <h4 className="font-extrabold text-slate-800 text-sm mb-4">
-                    Contient {dossier.encaissementIds.length} encaissements
-                  </h4>
-                  <div className="flex flex-col gap-2">
+              {dossiersPaiement.filter(d => d.clientId === id).map((dossier) => {
+                // Get all encaissements for this dossier
+                const dossierEncaissements = allEncaissements.filter(e => dossier.encaissementIds.includes(e.id));
+                
+                return (
+                  <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200">
+                        Dossier Fusionné
+                      </span>
+                      <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
+                    </div>
+                    
+                    <div className="space-y-3 mb-5">
+                      {dossierEncaissements.map((enc, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
+                          <div>
+                            <div className="text-sm font-bold text-slate-800">{enc.projectName}</div>
+                            <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
+                              <span className="uppercase">{enc.product}</span>
+                              <span>•</span>
+                              <span>{enc.mode}</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] text-slate-400 font-medium">Échéance</div>
+                            <div className="text-xs font-bold text-slate-700">{new Date(enc.targetDate).toLocaleDateString('fr-FR', {month: 'short', year:'numeric'})}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
                     <div className="flex justify-between items-center text-xs font-bold text-slate-500">
-                      <span>Statut:</span>
-                      <span className="text-slate-800">{dossier.status}</span>
+                      <span>Statut global:</span>
+                      <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg">{dossier.status}</span>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-slate-100 text-right">
+                      <Link to={`/`} className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 uppercase tracking-wide flex items-center justify-end gap-1">
+                        Ouvrir le dossier <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
+                      </Link>
                     </div>
                   </div>
-                  <div className="mt-4 pt-4 border-t border-slate-100 text-right">
-                    <Link to={`/`} className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 uppercase tracking-wide">
-                      Ouvrir le dossier &rarr;
-                    </Link>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -711,6 +742,72 @@ export default function ClientDetails() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Modal de prévisualisation de fusion */}
+      {selectedFusionGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-xl font-extrabold text-slate-900 flex items-center gap-3">
+                <FolderKanban className="w-6 h-6 text-indigo-600" />
+                Détails des Encaissements
+              </h3>
+              <button onClick={() => setSelectedFusionGroup(null)} className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              <p className="text-sm font-medium text-slate-500 mb-2">Ces encaissements sont prévus pour la même période. Vérifiez les informations avant de créer un dossier d'encaissement global.</p>
+              {selectedFusionGroup.map((enc, idx) => (
+                <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:border-indigo-300 transition-colors">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-lg">
+                        {enc.projectName}
+                      </h4>
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mt-1">
+                        <span className="bg-slate-100 px-2 py-0.5 rounded-md text-slate-700 uppercase tracking-wider">{enc.product}</span>
+                        <span>•</span>
+                        <span>{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span>
+                      </div>
+                    </div>
+                    <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">
+                      Échéance: {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-sm mt-4 border-t border-slate-100 pt-4">
+                    <div className="text-slate-500 font-medium">Statut de la proforma:</div>
+                    <div className="font-bold text-slate-700">
+                       {enc.proforma?.status === 'DONE' ? 'Générée' : 'En attente'}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button 
+                onClick={() => setSelectedFusionGroup(null)}
+                className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 transition-colors"
+              >
+                Annuler
+              </button>
+              <button 
+                onClick={() => {
+                  handleCreateDossier(selectedFusionGroup);
+                  setSelectedFusionGroup(null);
+                }}
+                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 transition-colors shadow-md flex items-center gap-2"
+              >
+                <FolderKanban className="w-5 h-5" />
+                Créer le dossier d'encaissement
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -97,5 +97,22 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(missionId) && isValidMission(incoming());
       allow delete: if isSignedIn() && isValidId(missionId);
     }
+    function isValidDossier(data) {
+      return data.keys().hasAll(['clientId', 'projectIds', 'encaissementIds', 'status', 'createdAt', 'total', 'encaisse']) &&
+             data.clientId is string &&
+             data.projectIds is list && data.projectIds.size() <= 100 &&
+             data.encaissementIds is list && data.encaissementIds.size() <= 100 &&
+             data.status in ['DRAFT', 'PROFORMA_GENERATED', 'VALIDATED', 'FACTURE_GENERATED', 'DONE'] &&
+             data.createdAt is string &&
+             data.total is number &&
+             data.encaisse is number;
+    }
+
+    match /dossiers/{dossierId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(dossierId) && isValidDossier(incoming());
+      allow update: if isSignedIn() && isValidId(dossierId) && isValidDossier(incoming());
+      allow delete: if isSignedIn() && isValidId(dossierId);
+    }
   }
 }

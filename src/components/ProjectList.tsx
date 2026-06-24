@@ -410,6 +410,11 @@ export default function ProjectList() {
             {filteredProjects.map((project, index) => {
               const client = clients.find(c => c.id === project.clientId);
 
+              const activeContract = project.contracts?.find(c => c.status === 'ACTIVE') || project.contracts?.[0];
+              const activePhase = activeContract?.phases?.find(p => p.status === 'ACTIVE' || p.status === 'PENDING') || activeContract?.phases?.[0];
+              const displayMode = activeContract?.mode || project.mode || 'Acquisition';
+              const displayPhase = activePhase?.name || project.phase || 'Démarchage';
+
               // Count open contracts
               const openContractsCount = (project.contracts || []).filter(c => c.status === 'ACTIVE').length;
 
@@ -452,11 +457,11 @@ export default function ProjectList() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[9px] uppercase tracking-wider opacity-75">Mode:</span>
-                      <span className="text-[11px]">{project.mode || 'Acquisition'}</span>
+                      <span className="text-[11px]">{displayMode}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[9px] uppercase tracking-wider opacity-75">Phase:</span>
-                      <span className="text-[11px]">{project.phase || 'Démarchage'}</span>
+                      <span className="text-[11px]">{displayPhase}</span>
                     </div>
                   </div>
 

@@ -86,7 +86,7 @@ interface AppState {
   deleteMission: (id: string) => void;
   dossiersPaiement: DossierPaiement[];
   setDossiersPaiement: (dossiers: DossierPaiement[]) => void;
-  addDossierPaiement: (dossier: Omit<DossierPaiement, 'id' | 'createdAt'>) => void;
+  addDossierPaiement: (dossier: Omit<DossierPaiement, 'id' | 'createdAt'>) => Promise<string>;
   updateDossierPaiement: (id: string, data: Partial<DossierPaiement>) => void;
   deleteDossierPaiement: (id: string) => void;
   updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
@@ -526,29 +526,39 @@ export const useStore = create<AppState>()(
           }
         }
 
-        // --- NOUVEAU LOGIQUE : GÉNÉRATION DES ENCAISSEMENTS ---
+        // --- NOUVELLE LOGIQUE : GÉNÉRATION DES ENCAISSEMENTS ---
         let currentEncaissements = [...(project.encaissements || [])];
+        
+        // 1. Gérer l'encaissement d'Acquisition (S'active si on atteint la phase Encaissement ou Recouvrement)
+        const isAcqEncaissementPhaseActive = acqContract?.phases?.some(p => 
+          (p.name === 'Encaissement' || p.name === 'Recouvrement') && (p.status === 'ACTIVE' || p.status === 'DONE')
+        );
+
+        if (isAcqEncaissementPhaseActive) {
+           let acqEnc = currentEncaissements.find(e => e.mode === 'Acquisition');
+           if (!acqEnc) {
+             acqEnc = {
+                id: uuidv4(),
+                projectId,
+                mode: 'Acquisition',
+                targetDate: new Date().toISOString().split('T')[0],
+                status: 'IN_PROGRESS',
+                proforma: { status: 'PENDING' },
+                bc: { status: 'PENDING' },
+                facture: { status: 'PENDING' }
+             };
+             currentEncaissements.push(acqEnc);
+             hasChanges = true;
+           } else if (acqEnc.status === 'UPCOMING') {
+             acqEnc.status = 'IN_PROGRESS';
+             hasChanges = true;
+           }
+        }
+
+        // 2. Gérer les maintenances si la formation est terminée
         if (formationDoneDate) {
-          const acqTargetDate = new Date(formationDoneDate);
-          acqTargetDate.setMonth(acqTargetDate.getMonth() + 6);
-          
           const maintTargetDate = new Date(formationDoneDate);
           maintTargetDate.setMonth(maintTargetDate.getMonth() + 18);
-
-          // Vérifier si Acquisition Encaissement existe
-          if (!currentEncaissements.find(e => e.mode === 'Acquisition')) {
-            currentEncaissements.push({
-              id: uuidv4(),
-              projectId,
-              mode: 'Acquisition',
-              targetDate: acqTargetDate.toISOString().split('T')[0],
-              status: acqTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
-              proforma: { status: 'PENDING' },
-              bc: { status: 'PENDING' },
-              facture: { status: 'PENDING' }
-            });
-            hasChanges = true;
-          }
 
           // Vérifier si Maintenance 1 Encaissement existe (Year 1)
           if (!currentEncaissements.find(e => e.mode === 'Maintenance' && e.year === 1)) {
@@ -565,16 +575,16 @@ export const useStore = create<AppState>()(
             });
             hasChanges = true;
           }
-          
-          // Maj des statuts si les dates sont passées pour les UPCOMING existants
-          currentEncaissements = currentEncaissements.map(enc => {
-            if (enc.status === 'UPCOMING' && new Date(enc.targetDate) <= new Date()) {
-              hasChanges = true;
-              return { ...enc, status: 'IN_PROGRESS' };
-            }
-            return enc;
-          });
         }
+        
+        // Maj des statuts si les dates sont passées pour les UPCOMING existants
+        currentEncaissements = currentEncaissements.map(enc => {
+          if (enc.status === 'UPCOMING' && new Date(enc.targetDate) <= new Date()) {
+            hasChanges = true;
+            return { ...enc, status: 'IN_PROGRESS' };
+          }
+          return enc;
+        });
 
         if (hasChanges) {
           state.updateProject(projectId, { contracts: updatedContracts, encaissements: currentEncaissements });
@@ -713,8 +723,10 @@ export const useStore = create<AppState>()(
         try {
           await setDoc(doc(db, 'dossiers', id), newDossier);
           set((state) => ({ dossiersPaiement: [...state.dossiersPaiement, newDossier] }));
+          return id;
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'Création du dossier de paiement');
+          throw error;
         }
       },
       updateDossierPaiement: async (id, data) => {
