@@ -82,43 +82,46 @@ export default function ClientsList() {
               return (
                 <div 
                   key={client.id} 
-                  className="bg-white border border-slate-200/70 rounded-2xl shadow-[0_2px_12px_-3px_rgba(0,0,0,0.03)] hover:shadow-lg hover:-translate-y-0.5 hover:border-blue-200 transition-all duration-300 flex flex-col justify-between group overflow-hidden"
+                  className="relative bg-white/60 backdrop-blur-md border border-white/60 rounded-[24px] shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:shadow-blue-500/10 hover:-translate-y-1 hover:border-blue-200/80 transition-all duration-300 flex flex-col justify-between group overflow-hidden"
                 >
-                  <Link to={`/clients/${client.id}`} className="p-5 block flex-1 space-y-4">
+                  {/* Halo coloré en arrière-plan */}
+                  <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full blur-3xl z-0 pointer-events-none opacity-20 group-hover:opacity-40 transition-opacity duration-500 bg-blue-500" />
+                  
+                  <Link to={`/clients/${client.id}`} className="p-6 block flex-1 space-y-5 relative z-10">
                     <div className="flex justify-between items-start gap-4">
                       {/* Avatar initials with dynamic background */}
-                      <div className={`h-11 w-11 rounded-xl border flex items-center justify-center font-bold text-sm uppercase shrink-0 ${avatarStyle}`}>
+                      <div className={`h-14 w-14 rounded-2xl flex items-center justify-center font-black text-lg uppercase shrink-0 shadow-sm border-2 border-white/50 ${avatarStyle}`}>
                         {client.name.charAt(0)}
                         {client.name.split(' ')[1]?.charAt(0)}
                       </div>
                       <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 shrink-0 transition-all" />
                     </div>
                     
-                    <div className="space-y-1">
-                      <h4 className="font-bold text-base text-slate-950 group-hover:text-blue-600 transition-colors leading-tight tracking-tight line-clamp-2">
+                    <div className="space-y-1.5 mt-2">
+                      <h4 className="font-extrabold text-lg text-slate-900 group-hover:text-blue-600 transition-colors leading-tight tracking-tight line-clamp-2">
                         {client.name}
                       </h4>
-                      <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
-                        <MapPin className="w-3.5 h-3.5 text-slate-300" />
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
                         <span>Wilaya {client.wilaya}</span>
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 pt-2 text-xs text-slate-500 font-medium">
+                    <div className="flex items-center gap-2 pt-2 text-xs text-slate-600 font-bold">
                       <Users className="w-4 h-4 text-slate-400" />
                       <span>{client.effectif} {client.effectifType === 'SALARIES' ? 'Salariés' : 'Étudiants'}</span>
                     </div>
                   </Link>
 
                   {/* Card actions footer */}
-                  <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/40 flex justify-between items-center mt-auto">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-blue-50 text-blue-700 border border-blue-100/60 shadow-sm">
+                  <div className="px-6 py-4 border-t border-slate-200/40 bg-white/40 flex justify-between items-center mt-auto relative z-10 backdrop-blur-sm">
+                    <span className="inline-flex items-center px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest bg-blue-50/80 text-blue-700 border border-blue-100 shadow-sm">
                       {clientProjects.length} projet{clientProjects.length > 1 ? 's' : ''}
                     </span>
-                    <div className="flex gap-1.5">
+                    <div className="flex gap-2">
                       <Link 
                         to={`/clients/${client.id}/edit`}
-                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-white rounded-xl shadow-sm transition-all border border-transparent hover:border-slate-200/50"
                         title="Modifier"
                       >
                         <Edit className="w-4 h-4" />
@@ -128,7 +131,7 @@ export default function ClientsList() {
                           e.preventDefault();
                           handleDelete(client.id);
                         }}
-                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-xl shadow-sm transition-all border border-transparent hover:border-red-100"
                         title="Supprimer"
                       >
                         <Trash2 className="w-4 h-4" />

@@ -68,6 +68,7 @@ interface AppState {
   deleteProject: (id: string) => void;
   addContract: (projectId: string, contract: { name: string; type: string }) => void;
   updateContractStatus: (projectId: string, contractId: string, status: 'ACTIVE' | 'CLOSED') => void;
+  togglePhaseStatus: (projectId: string, contractId: string, phaseId: string) => void;
   addTaskToContract: (projectId: string, contractId: string, phaseId: string, task: Omit<ProjectTask, 'id'>) => void;
   updateTaskInContract: (projectId: string, contractId: string, phaseId: string, taskId: string, data: Partial<ProjectTask>) => void;
   evaluateAutomations: (projectId: string) => void;
@@ -192,71 +193,6 @@ export const useStore = create<AppState>()(
           }
         ];
 
-        const mockContacts = [
-          {
-            id: uuidv4(),
-            name: "Abdelkrim Bensmail",
-            role: "Directeur de Projet (DSI)",
-            phone: "0550 12 34 56",
-            email: "a.bensmail@client.dz"
-          },
-          {
-            id: uuidv4(),
-            name: "Sarah Mansouri",
-            role: "Responsable Finances & Facturation",
-            phone: "0661 78 90 12",
-            email: "s.mansouri@client.dz"
-          }
-        ];
-
-        const mockDocuments = [
-          {
-            id: uuidv4(),
-            name: "Facture_Proforma_FP-2026-004.pdf",
-            date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            size: "1.2 MB"
-          },
-          {
-            id: uuidv4(),
-            name: "Cahier_des_Charges_Exigences.docx",
-            date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            size: "3.4 MB"
-          }
-        ];
-
-        const mockHistory = [
-          {
-            id: uuidv4(),
-            date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            message: "Projet initialisé dans le CRM"
-          },
-          {
-            id: uuidv4(),
-            date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            message: "Contrat 'Démarchage & Négociation' créé"
-          },
-          {
-            id: uuidv4(),
-            date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            message: "Contrat 'Adaptation & Déploiement' créé et démarré"
-          },
-          {
-            id: uuidv4(),
-            date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            message: "Document téléversé : Facture_Proforma_FP-2026-004.pdf"
-          },
-          {
-            id: uuidv4(),
-            date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR'),
-            message: "Contrat 'Facturation & Encaissement' créé et démarré"
-          },
-          {
-            id: uuidv4(),
-            date: new Date().toLocaleDateString('fr-FR'),
-            message: "Alerte : Incident signalé sur la tâche 'Récupération du Bon de Commande (BC) signé'"
-          }
-        ];
-
         // Format createdAt to fr-FR date string
         let formattedCreatedAt = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR');
         if (projectData.createdAt) {
@@ -273,9 +209,15 @@ export const useStore = create<AppState>()(
           status: 'Actif',
           createdAt: new Date().toISOString().split('T')[0],
           contracts: initialContracts,
-          contacts: mockContacts,
-          documents: mockDocuments,
-          history: mockHistory,
+          contacts: [],
+          documents: [],
+          history: [
+            {
+              id: uuidv4(),
+              date: new Date().toLocaleDateString('fr-FR'),
+              message: "Projet initialisé dans le CRM"
+            }
+          ],
           acqProforma: createEmptyDoc(),
           acqSoumission: createEmptyDoc(),
           acqConvention: createEmptyDoc(),
@@ -342,7 +284,7 @@ export const useStore = create<AppState>()(
 
         state.updateProject(projectId, { contracts, history: newHistory });
       },
-      advanceProjectPhase: (projectId, contractId, phaseId) => {
+      togglePhaseStatus: (projectId, contractId, phaseId) => {
         const state = get();
         const project = state.projects.find(p => p.id === projectId);
         if (!project || !project.contracts) return;
@@ -356,41 +298,54 @@ export const useStore = create<AppState>()(
         const phaseIndex = phases.findIndex(p => p.id === phaseId);
         if (phaseIndex === -1) return;
 
-        // Marquer la phase courante comme DONE
-        phases[phaseIndex] = { ...phases[phaseIndex], status: 'DONE' };
-        
-        let message = `Phase "${phases[phaseIndex].name}" terminée.`;
+        const isCurrentlyDone = phases[phaseIndex].status === 'DONE';
 
-        // Si c'est la dernière phase, marquer le contrat comme DONE
-        if (phaseIndex === phases.length - 1) {
-          contract.status = 'DONE';
-          message += ` Contrat "${contract.name}" clôturé.`;
-        } else {
-          // Sinon, activer la phase suivante
-          phases[phaseIndex + 1] = { 
-            ...phases[phaseIndex + 1], 
-            status: 'ACTIVE',
-            startDate: new Date().toISOString().split('T')[0] 
-          };
-          message += ` Phase "${phases[phaseIndex + 1].name}" démarrée.`;
-        }
-
-        contract.phases = phases;
-        currentContracts[contractIndex] = contract;
-
-        const newHistory = [
-          ...(project.history || []),
-          {
-            id: uuidv4(),
-            date: new Date().toLocaleDateString('fr-FR'),
-            message
+        if (isCurrentlyDone) {
+          // Rouvrir la phase
+          phases[phaseIndex] = { ...phases[phaseIndex], status: 'ACTIVE' };
+          let message = `Phase "${phases[phaseIndex].name}" rouverte.`;
+          
+          if (contract.status === 'DONE') {
+            contract.status = 'ACTIVE';
+            message += ` Contrat "${contract.name}" rouvert.`;
           }
-        ];
 
-        state.updateProject(projectId, {
-          contracts: currentContracts,
-          history: newHistory
-        });
+          contract.phases = phases;
+          currentContracts[contractIndex] = contract;
+
+          const newHistory = [
+            ...(project.history || []),
+            { id: uuidv4(), date: new Date().toLocaleDateString('fr-FR'), message }
+          ];
+
+          state.updateProject(projectId, { contracts: currentContracts, history: newHistory });
+        } else {
+          // Clôturer la phase et passer à la suivante
+          phases[phaseIndex] = { ...phases[phaseIndex], status: 'DONE' };
+          let message = `Phase "${phases[phaseIndex].name}" terminée.`;
+
+          if (phaseIndex === phases.length - 1) {
+            contract.status = 'DONE';
+            message += ` Contrat "${contract.name}" clôturé.`;
+          } else {
+            phases[phaseIndex + 1] = { 
+              ...phases[phaseIndex + 1], 
+              status: 'ACTIVE',
+              startDate: phases[phaseIndex + 1].startDate || new Date().toISOString().split('T')[0] 
+            };
+            message += ` Phase "${phases[phaseIndex + 1].name}" démarrée.`;
+          }
+
+          contract.phases = phases;
+          currentContracts[contractIndex] = contract;
+
+          const newHistory = [
+            ...(project.history || []),
+            { id: uuidv4(), date: new Date().toLocaleDateString('fr-FR'), message }
+          ];
+
+          state.updateProject(projectId, { contracts: currentContracts, history: newHistory });
+        }
 
         get().evaluateAutomations(projectId);
       },

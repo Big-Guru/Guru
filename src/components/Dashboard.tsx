@@ -1,11 +1,30 @@
 import { useStore } from '../store';
 import { calculateAlerts } from '../lib/alerts';
 import { Link } from 'react-router-dom';
-import { Briefcase, Users, AlertTriangle, AlertCircle, Calendar, MapPin, ArrowRight } from 'lucide-react';
-import { auth } from '../lib/firebase';
+import { Briefcase, Users, AlertTriangle, AlertCircle, Calendar, MapPin, ArrowRight, Trash2 } from 'lucide-react';
+import { auth, db } from '../lib/firebase';
+import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { useState } from 'react';
 
 export default function Dashboard() {
   const { clients, projects, missions } = useStore();
+  const [isWiping, setIsWiping] = useState(false);
+
+  const handleWipeProjects = async () => {
+    if (!window.confirm("Voulez-vous vraiment supprimer TOUS les projets de la base de données Firebase ?")) return;
+    setIsWiping(true);
+    try {
+      const snapshot = await getDocs(collection(db, 'projects'));
+      for (const document of snapshot.docs) {
+        await deleteDoc(doc(db, 'projects', document.id));
+      }
+      alert("Succès ! La base de données des projets est vierge.");
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la purge : " + String(err));
+    }
+    setIsWiping(false);
+  };
   
   const alertsByProject = projects.map(p => ({
     project: p,
@@ -55,9 +74,19 @@ export default function Dashboard() {
           </p>
         </div>
         
-        <div className="relative z-10 shrink-0 bg-white/15 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/20 text-center min-w-[120px] shadow-lg">
-          <div className="text-3xl font-black text-white tracking-tight">{totalCritical}</div>
-          <div className="text-[10px] font-bold uppercase tracking-wider text-white/90 mt-1">Alertes critiques</div>
+        <div className="relative z-10 shrink-0 flex flex-col gap-3">
+          <div className="bg-white/15 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/20 text-center min-w-[120px] shadow-lg">
+            <div className="text-3xl font-black text-white tracking-tight">{totalCritical}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-white/90 mt-1">Alertes critiques</div>
+          </div>
+          <button 
+            onClick={handleWipeProjects}
+            disabled={isWiping}
+            className="flex items-center justify-center gap-2 px-3 py-2.5 bg-red-500/80 hover:bg-red-600 backdrop-blur-md rounded-xl text-white text-[11px] uppercase tracking-widest font-black transition-all shadow-lg border border-red-400/50"
+          >
+            <Trash2 className="w-4 h-4" />
+            {isWiping ? "Purge..." : "Purger les projets"}
+          </button>
         </div>
       </div>
 

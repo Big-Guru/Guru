@@ -6,6 +6,23 @@ import { calculateAlerts } from '../lib/alerts';
 import { cn } from '../lib/utils';
 import SearchInput from './SearchInput';
 
+const ALGERIAN_WILAYAS = [
+  "01 - Adrar", "02 - Chlef", "03 - Laghouat", "04 - Oum El Bouaghi", "05 - Batna",
+  "06 - Béjaïa", "07 - Biskra", "08 - Béchar", "09 - Blida", "10 - Bouira",
+  "11 - Tamanrasset", "12 - Tébessa", "13 - Tlemcen", "14 - Tiaret", "15 - Tizi Ouzou",
+  "16 - Alger", "17 - Djelfa", "18 - Jijel", "19 - Sétif", "20 - Saïda",
+  "21 - Skikda", "22 - Sidi Bel Abbès", "23 - Annaba", "24 - Guelma", "25 - Constantine",
+  "26 - Médéa", "27 - Mostaganem", "28 - M'Sila", "29 - Mascara", "30 - Ouargla",
+  "31 - Oran", "32 - El Bayadh", "33 - Illizi", "34 - Bordj Bou Arreridj", "35 - Boumerdès",
+  "36 - El Tarf", "37 - Tindouf", "38 - Tissemsilt", "39 - El Oued", "40 - Khenchela",
+  "41 - Souk Ahras", "42 - Tipaza", "43 - Mila", "44 - Aïn Defla", "45 - Naâma",
+  "46 - Aïn Témouchent", "47 - Ghardaïa", "48 - Relizane", "49 - Timimoun", "50 - Bordj Badji Mokhtar",
+  "51 - Ouled Djellal", "52 - Béni Abbès", "53 - In Salah", "54 - In Guezzam", "55 - Touggourt",
+  "56 - Djanet", "57 - El M'Ghair", "58 - El Meniaa"
+];
+
+const TECH_COLLABS = ["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"];
+
 export default function ProjectList() {
   const { projects, clients, addProject } = useStore();
 
@@ -15,27 +32,22 @@ export default function ProjectList() {
   const [newProjectData, setNewProjectData] = useState({
     clientId: '',
     name: '',
-    departement: 'Technique',
+    departement: 'D1',
     product: 'PAYE',
     wilaya: '',
     ville: '',
     entity: 'Naltis' as 'Naltis' | 'Netsprint' | 'MP',
-    techniqueRaw: '', // comma separated list
+    technique: [] as string[],
     mode: 'Acquisition' as 'Acquisition' | 'Maintenance offerte' | 'Maintenance',
     phase: 'Démarchage' as 'Démarchage' | 'Adaptation' | 'Encaissement' | 'Recouvrement',
     status: 'Actif' as 'Actif' | 'Effectué' | 'Suspendu' | 'Abandonné',
-    createdAt: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    installationDate: new Date(Date.now() - 150 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    createdAt: new Date().toISOString().split('T')[0]
   });
 
   const handleAddProject = (e: React.FormEvent) => {
     e.preventDefault();
     const client = clients.find(c => c.id === newProjectData.clientId);
     if (!newProjectData.clientId || !client || !newProjectData.name) return;
-
-    const technique = newProjectData.techniqueRaw
-      ? newProjectData.techniqueRaw.split(',').map(name => name.trim()).filter(Boolean)
-      : [];
 
     addProject({
       clientId: newProjectData.clientId,
@@ -45,29 +57,28 @@ export default function ProjectList() {
       wilaya: newProjectData.wilaya || client.wilaya,
       ville: newProjectData.ville,
       entity: newProjectData.entity,
-      technique,
+      technique: newProjectData.technique,
       mode: newProjectData.mode,
       phase: newProjectData.phase,
       status: newProjectData.status,
       createdAt: newProjectData.createdAt,
-      installationDate: newProjectData.installationDate,
+      installationDate: newProjectData.createdAt,
     });
 
     setShowNewProject(false);
     setNewProjectData({
       clientId: '',
       name: '',
-      departement: 'Technique',
+      departement: 'D1',
       product: 'PAYE',
       wilaya: '',
       ville: '',
       entity: 'Naltis',
-      techniqueRaw: '',
+      technique: [],
       mode: 'Acquisition',
       phase: 'Démarchage',
       status: 'Actif',
-      createdAt: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      installationDate: new Date(Date.now() - 150 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      createdAt: new Date().toISOString().split('T')[0]
     });
   };
 
@@ -216,14 +227,15 @@ export default function ProjectList() {
 
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Département</label>
-                <input
-                  type="text"
+                <select
                   required
-                  placeholder="ex: Finance, RH, Technique"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
                   value={newProjectData.departement}
                   onChange={e => setNewProjectData({ ...newProjectData, departement: e.target.value })}
-                />
+                >
+                  <option value="D1">D1</option>
+                  <option value="D2">D2</option>
+                </select>
               </div>
 
               <div>
@@ -246,13 +258,16 @@ export default function ProjectList() {
 
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Wilaya</label>
-                <input
-                  type="text"
-                  placeholder="Optionnel (prendra la wilaya du client)"
+                <select
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
                   value={newProjectData.wilaya}
                   onChange={e => setNewProjectData({ ...newProjectData, wilaya: e.target.value })}
-                />
+                >
+                  <option value="">Sélectionner une wilaya</option>
+                  {ALGERIAN_WILAYAS.map(w => (
+                    <option key={w} value={w}>{w}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -325,35 +340,36 @@ export default function ProjectList() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Technique (Collaborateurs - séparés par des virgules)</label>
-                <input
-                  type="text"
-                  placeholder="ex: Amine, Sofiane, Karim"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
-                  value={newProjectData.techniqueRaw}
-                  onChange={e => setNewProjectData({ ...newProjectData, techniqueRaw: e.target.value })}
-                />
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Collaborateurs techniques</label>
+                <div className="flex flex-wrap gap-3">
+                  {TECH_COLLABS.map(collab => (
+                    <label key={collab} className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl shadow-sm hover:border-blue-400 transition-colors">
+                      <input 
+                        type="checkbox"
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
+                        checked={newProjectData.technique.includes(collab)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNewProjectData({...newProjectData, technique: [...newProjectData.technique, collab]});
+                          } else {
+                            setNewProjectData({...newProjectData, technique: newProjectData.technique.filter(c => c !== collab)});
+                          }
+                        }}
+                      />
+                      <span className="text-sm font-semibold text-slate-700">{collab}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Date de création fictive</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Date de création</label>
                 <input
                   type="date"
                   required
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
                   value={newProjectData.createdAt}
                   onChange={e => setNewProjectData({ ...newProjectData, createdAt: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Date d'installation fictive</label>
-                <input
-                  type="date"
-                  required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
-                  value={newProjectData.installationDate}
-                  onChange={e => setNewProjectData({ ...newProjectData, installationDate: e.target.value })}
                 />
               </div>
             </div>
@@ -391,7 +407,7 @@ export default function ProjectList() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-            {filteredProjects.map(project => {
+            {filteredProjects.map((project, index) => {
               const client = clients.find(c => c.id === project.clientId);
 
               // Count open contracts
@@ -399,7 +415,7 @@ export default function ProjectList() {
 
               return (
                 <Link
-                  key={project.id}
+                  key={`${project.id}-${index}`}
                   to={`/projects/${project.id}`}
                   className={cn(
                     "relative rounded-3xl p-6 shadow-md hover:shadow-2xl transition-all duration-300 hover:-translate-y-1.5 flex flex-col justify-between min-h-[220px] overflow-hidden group border border-white/10",

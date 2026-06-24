@@ -25,7 +25,7 @@ export default function ProjectDetails() {
     addContract,
     updateContractStatus,
     updateTaskInContract,
-    advanceProjectPhase,
+    togglePhaseStatus,
     addMaintenance,
     deleteMaintenance
   } = useStore();
@@ -59,11 +59,15 @@ export default function ProjectDetails() {
   const [newMaintenanceYear, setNewMaintenanceYear] = useState(new Date().getFullYear());
   const [newMaintenanceDate, setNewMaintenanceDate] = useState(new Date().toISOString().split('T')[0]);
 
+  const [reportModalTask, setReportModalTask] = useState<{phaseId: string, taskId: string, report: string} | null>(null);
+  const [reportEmail, setReportEmail] = useState('');
+
   const [editData, setEditData] = useState({
-    departement: project?.departement || '',
-    product: project?.product || '',
-    entity: project?.entity || '',
-    technique: project?.technique?.join(', ') || '',
+    departement: project?.departement || 'D1',
+    product: project?.product || 'PAYE',
+    version: project?.version || 'LIGHT',
+    entity: project?.entity || 'Naltis',
+    technique: project?.technique || [],
     responsable: project?.ownerId || '',
     wilaya: project?.wilaya || '',
     ville: project?.ville || '',
@@ -124,6 +128,22 @@ export default function ProjectDetails() {
     setNewTaskName('');
   };
 
+  const handleSaveReport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reportModalTask || !currentContract) return;
+    
+    updateTaskInContract(project.id, currentContract.id, reportModalTask.phaseId, reportModalTask.taskId, { reports: reportModalTask.report });
+    
+    if (reportEmail) {
+      const subject = encodeURIComponent(`Rapport de tâche - ${project.name}`);
+      const body = encodeURIComponent(reportModalTask.report);
+      window.location.href = `mailto:${reportEmail}?subject=${subject}&body=${body}`;
+    }
+    
+    setReportModalTask(null);
+    setReportEmail('');
+  };
+
   const handleAddContact = (e: React.FormEvent) => {
     e.preventDefault();
     const newContact: ProjectContact = {
@@ -169,9 +189,10 @@ export default function ProjectDetails() {
     e.preventDefault();
     updateProject(project.id, {
       departement: editData.departement,
-      product: editData.product,
+      product: editData.product as any,
+      version: editData.version as any,
       entity: editData.entity as any,
-      technique: editData.technique.split(',').map(s => s.trim()).filter(Boolean),
+      technique: editData.technique,
       ownerId: editData.responsable,
       wilaya: editData.wilaya,
       ville: editData.ville,
@@ -247,23 +268,36 @@ export default function ProjectDetails() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3 shrink-0">
-          <button onClick={() => setShowContacts(true)} className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-slate-700 hover:text-indigo-800 rounded-2xl text-xs font-extrabold shadow-sm transition-all group">
-            <User className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" />
-            Contacts
-            <span className="bg-slate-100 group-hover:bg-indigo-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] ml-1">{contactsList.length}</span>
-          </button>
-          
-          <button onClick={() => setShowBilling(true)} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-800 hover:to-slate-900 text-white rounded-2xl text-xs font-extrabold shadow-md transition-all hover:-translate-y-0.5 shadow-slate-900/20">
-            <FileText className="w-4 h-4 text-slate-300" />
-            Documents
-          </button>
+        {(() => {
+          const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
+          const encaissementPhase = acquisitionContract?.phases?.find(p => p.name === 'Encaissement');
+          const isEncaissementActiveOrDone = encaissementPhase && (encaissementPhase.status === 'ACTIVE' || encaissementPhase.status === 'DONE');
+          const missingAcquisitionDocs = encaissementPhase?.tasks?.filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS') || [];
+          const missingDocsCount = isEncaissementActiveOrDone ? missingAcquisitionDocs.length : 0;
 
-          <button onClick={() => setShowFacturation(true)} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-2xl text-xs font-extrabold shadow-md transition-all hover:-translate-y-0.5 shadow-emerald-600/20">
-            <Banknote className="w-4 h-4 text-emerald-100" />
-            Facturation
-          </button>
-        </div>
+          return (
+            <div className="flex flex-wrap items-center justify-end gap-3 shrink-0">
+              <button onClick={() => setShowContacts(true)} className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-slate-700 hover:text-indigo-800 rounded-2xl text-xs font-extrabold shadow-sm transition-all group">
+                <User className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" />
+                Contacts
+                <span className="bg-slate-100 group-hover:bg-indigo-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] ml-1">{contactsList.length}</span>
+              </button>
+              
+              <button onClick={() => setShowBilling(true)} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-800 hover:to-slate-900 text-white rounded-2xl text-xs font-extrabold shadow-md transition-all hover:-translate-y-0.5 shadow-slate-900/20">
+                <FileText className="w-4 h-4 text-slate-300" />
+                Documents
+                {missingDocsCount > 0 && (
+                  <span className="bg-red-500 text-white px-2 py-0.5 rounded-md text-[10px] ml-1 shadow-sm font-black animate-pulse">{missingDocsCount} manquants</span>
+                )}
+              </button>
+
+              <button onClick={() => setShowFacturation(true)} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-2xl text-xs font-extrabold shadow-md transition-all hover:-translate-y-0.5 shadow-emerald-600/20">
+                <Banknote className="w-4 h-4 text-emerald-100" />
+                Facturation
+              </button>
+            </div>
+          );
+        })()}
 
         <div className="space-y-4">
           <div className="flex justify-between items-center">
@@ -273,7 +307,7 @@ export default function ProjectDetails() {
             </h3>
           </div>
 
-          <div className="flex flex-row items-center overflow-x-auto pb-8 pt-8 pl-4 pr-12 scrollbar-hide group/list">
+          <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-8 px-4 scrollbar-hide">
             {contractsList.map((card, index) => {
               const isActive = selectedContractId ? card.id === selectedContractId : currentContract?.id === card.id;
               const isPending = card.status === 'PENDING';
@@ -287,11 +321,11 @@ export default function ProjectDetails() {
 
               let colorClasses = "";
               if (card.mode === 'Acquisition') {
-                colorClasses = isActive ? "bg-blue-50/90 backdrop-blur-xl border-blue-200/60" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-blue-50/90 hover:border-blue-200/60";
+                colorClasses = isActive ? "bg-blue-50/90 backdrop-blur-xl border-blue-200/60 shadow-blue-500/10" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-blue-50/90 hover:border-blue-200/60";
               } else if (card.mode === 'Maintenance offerte') {
-                colorClasses = isActive ? "bg-red-50/90 backdrop-blur-xl border-red-200/60" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-red-50/90 hover:border-red-200/60";
+                colorClasses = isActive ? "bg-red-50/90 backdrop-blur-xl border-red-200/60 shadow-red-500/10" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-red-50/90 hover:border-red-200/60";
               } else {
-                colorClasses = isActive ? "bg-green-50/90 backdrop-blur-xl border-green-200/60" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-green-50/90 hover:border-green-200/60";
+                colorClasses = isActive ? "bg-emerald-50/90 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-emerald-50/90 hover:border-emerald-200/60";
               }
 
               return (
@@ -302,15 +336,12 @@ export default function ProjectDetails() {
                       setShowContractManager(true);
                     }}
                     className={cn(
-                      "shrink-0 flex flex-col justify-between p-5 rounded-3xl w-[280px] h-[180px] text-left transition-all duration-300 relative group border overflow-hidden",
+                      "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-300 relative border overflow-hidden",
                       colorClasses,
-                      isActive ? "shadow-xl scale-105 !z-40 -mr-4" : "shadow-sm -mr-16 scale-95",
-                      isPending && "grayscale cursor-not-allowed",
-                      isDone && "opacity-95 grayscale-[50%]",
-                      "group-hover/list:scale-95 group-hover/list:grayscale group-hover/list:opacity-80 group-hover/list:!z-0",
-                      "hover:!scale-105 hover:!grayscale-0 hover:!opacity-100 hover:!z-50 hover:-translate-y-2 hover:shadow-2xl"
+                      isActive ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02]" : "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]",
+                      isPending && "grayscale opacity-70",
+                      isDone && "opacity-90 grayscale-[30%]"
                     )}
-                    style={{ zIndex: contractsList.length - index }}
                   >
                     {/* Subtle glow for active card */}
                     {isActive && (
@@ -538,9 +569,9 @@ export default function ProjectDetails() {
                           isGreen ? 'bg-emerald-500' : isRed ? 'bg-red-500' : isBlue ? 'bg-blue-500' : 'bg-slate-500'
                         )} />
 
-                        <div className="flex justify-between items-start w-full relative z-10 gap-4">
+                        <div className="flex flex-wrap md:flex-nowrap items-center justify-between w-full relative z-10 gap-4">
                           <span className={cn(
-                            "font-extrabold text-sm block leading-relaxed flex-1 mt-0.5 transition-colors", 
+                            "font-extrabold text-sm block leading-relaxed flex-1 transition-colors", 
                             isGreen ? "text-emerald-700/60 line-through" : 
                             isBlue ? "text-blue-950" : 
                             isRed ? "text-red-950" : 
@@ -548,48 +579,51 @@ export default function ProjectDetails() {
                           )}>
                             {t.name}
                           </span>
-                          <select 
-                            value={t.status}
-                            onChange={(e) => updateTaskInContract(project.id, currentContract.id, currentPhase.id, t.id, { status: e.target.value as any })}
-                            className={cn(
-                              "px-3 py-1.5 rounded-xl font-extrabold uppercase tracking-widest text-[10px] outline-none cursor-pointer text-center appearance-none transition-all shadow-sm",
-                              isGreen ? 'bg-emerald-100/80 text-emerald-700 border border-emerald-200 hover:bg-emerald-200' : 
-                              isRed ? 'bg-red-100/80 text-red-700 border border-red-200 hover:bg-red-200' : 
-                              isBlue ? 'bg-blue-100/80 text-blue-700 border border-blue-200 hover:bg-blue-200' :
-                              'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'
-                            )}
-                            style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
-                          >
-                            <option value="PENDING">En attente</option>
-                            <option value="IN_PROGRESS">En cours</option>
-                            <option value="DONE">Effectué</option>
-                            <option value="CANCELED">Annulé</option>
-                          </select>
-                        </div>
+                          
+                          <div className="flex items-center gap-3 shrink-0">
+                            {/* Date Field */}
+                            <div className="flex items-center gap-2 bg-white border border-slate-200/60 shadow-sm rounded-xl px-2 py-1.5 transition-all hover:border-slate-300 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/10">
+                              <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <input 
+                                type="date" 
+                                value={t.date || ''} 
+                                onChange={(e) => updateTaskInContract(project.id, currentContract.id, currentPhase.id, t.id, { date: e.target.value })}
+                                className="bg-transparent border-none text-[11px] font-bold text-slate-700 outline-none cursor-pointer w-[100px]"
+                              />
+                            </div>
 
-                        <div className="flex flex-col md:flex-row md:items-center gap-4 relative z-10">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200/60 shadow-sm">
-                              <Clock className="w-3.5 h-3.5 text-slate-500" />
-                            </div>
-                            <input 
-                              type="date" 
-                              value={t.date || ''} 
-                              onChange={(e) => updateTaskInContract(project.id, currentContract.id, currentPhase.id, t.id, { date: e.target.value })}
-                              className="bg-transparent border-b-2 border-transparent hover:border-slate-300 focus:border-blue-500 py-1 text-xs font-bold text-slate-700 outline-none transition-all cursor-pointer"
-                            />
-                          </div>
-                          <div className="flex items-center gap-2.5 flex-1">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200/60 shadow-sm">
-                              <FileText className="w-3.5 h-3.5 text-slate-500" />
-                            </div>
-                            <input 
-                              type="text" 
-                              placeholder="Ajouter un rapport ou un commentaire..."
-                              value={t.reports || ''} 
-                              onChange={(e) => updateTaskInContract(project.id, currentContract.id, currentPhase.id, t.id, { reports: e.target.value })}
-                              className="flex-1 bg-white border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-700 outline-none focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all shadow-sm"
-                            />
+                            {/* Report Button */}
+                            <button
+                              title="Ajouter ou envoyer le rapport"
+                              onClick={() => setReportModalTask({ phaseId: currentPhase.id, taskId: t.id, report: t.reports || '' })}
+                              className={cn(
+                                "w-8 h-8 rounded-full flex items-center justify-center shadow-sm transition-all hover:scale-105",
+                                t.reports 
+                                  ? "bg-blue-100 text-blue-700 border border-blue-200"
+                                  : "bg-white text-slate-400 border border-slate-200 hover:text-blue-500 hover:border-blue-200"
+                              )}
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Status Select */}
+                            <select 
+                              value={t.status}
+                              onChange={(e) => updateTaskInContract(project.id, currentContract.id, currentPhase.id, t.id, { status: e.target.value as any })}
+                              className={cn(
+                                "px-3 py-1.5 rounded-xl font-extrabold uppercase tracking-widest text-[10px] outline-none cursor-pointer text-center appearance-none transition-all shadow-sm min-w-[100px]",
+                                isGreen ? 'bg-emerald-100/80 text-emerald-700 border border-emerald-200 hover:bg-emerald-200' : 
+                                isRed ? 'bg-red-100/80 text-red-700 border border-red-200 hover:bg-red-200' : 
+                                isBlue ? 'bg-blue-100/80 text-blue-700 border border-blue-200 hover:bg-blue-200' :
+                                'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'
+                              )}
+                              style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+                            >
+                              <option value="PENDING">En attente</option>
+                              <option value="IN_PROGRESS">En cours</option>
+                              <option value="DONE">Effectué</option>
+                              <option value="CANCELED">Annulé</option>
+                            </select>
                           </div>
                         </div>
                       </div>
@@ -597,6 +631,24 @@ export default function ProjectDetails() {
               })}
               </>
              )}
+             
+             {/* Bouton pour clôturer ou rouvrir la phase */}
+             {(currentPhase.tasks || []).length > 0 && (
+               <div className="mt-8 flex justify-center border-t border-slate-100/50 pt-6 relative z-10">
+                 <button
+                   onClick={() => togglePhaseStatus(project.id, currentContract.id, currentPhase.id)}
+                   className={cn(
+                     "px-6 py-2.5 rounded-2xl font-bold text-sm shadow-sm hover:-translate-y-0.5 transition-all duration-300",
+                     currentPhase.status === 'DONE' 
+                       ? "bg-white/60 text-amber-700 hover:bg-amber-50 border border-amber-200"
+                       : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 hover:shadow-emerald-500/25"
+                   )}
+                 >
+                   {currentPhase.status === 'DONE' ? 'Rouvrir la phase' : 'Clôturer la phase et passer à la suivante'}
+                 </button>
+               </div>
+             )}
+
             </div>
           </div>
         </div>
@@ -610,43 +662,97 @@ export default function ProjectDetails() {
             <button type="button" onClick={() => setShowEditProject(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-50 rounded-lg"><X className="w-5 h-5" /></button>
             <h3 className="font-extrabold text-slate-900 text-xl mb-6">Modifier les informations</h3>
             <form onSubmit={handleSaveEditProject} className="flex-1 overflow-y-auto pr-2 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Département</label>
-                  <input type="text" value={editData.departement} onChange={e => setEditData({ ...editData, departement: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
+                  <select value={editData.departement} onChange={e => setEditData({ ...editData, departement: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
+                    <option value="D1">D1</option>
+                    <option value="D2">D2</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Produit</label>
-                  <input type="text" value={editData.product} onChange={e => setEditData({ ...editData, product: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
+                  <select value={editData.product} onChange={e => setEditData({ ...editData, product: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
+                    <option value="PAYE">Paye</option>
+                    <option value="BUDGET">Budget</option>
+                    <option value="BUDGET_APC">Budget APC</option>
+                    <option value="STOCKS">Stocks</option>
+                    <option value="GRH">GRH</option>
+                    <option value="PHARMATIS">Pharmatis</option>
+                    <option value="GBS">GBS</option>
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Entité</label>
-                  <select value={editData.entity} onChange={e => setEditData({ ...editData, entity: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none">
-                    <option value="">Sélectionner</option>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Version</label>
+                  <select value={editData.version} onChange={e => setEditData({ ...editData, version: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
+                    <option value="ULTRALIGHT">UltraLight</option>
+                    <option value="LIGHT">Light</option>
+                    <option value="INTERMEDIATE">Intermediate</option>
+                    <option value="ADVANCED">Advanced</option>
+                    <option value="GLOBAL">Global</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Entité responsable</label>
+                  <select value={editData.entity} onChange={e => setEditData({ ...editData, entity: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
                     <option value="Naltis">Naltis</option>
                     <option value="Netsprint">Netsprint</option>
                     <option value="MP">Micro-Planete</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Responsable</label>
-                  <input type="text" value={editData.responsable} onChange={e => setEditData({ ...editData, responsable: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Wilaya</label>
+                  <select value={editData.wilaya} onChange={e => setEditData({ ...editData, wilaya: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
+                    <option value="">Sélectionner une wilaya</option>
+                    {[
+                      "01 - Adrar", "02 - Chlef", "03 - Laghouat", "04 - Oum El Bouaghi", "05 - Batna",
+                      "06 - Béjaïa", "07 - Biskra", "08 - Béchar", "09 - Blida", "10 - Bouira",
+                      "11 - Tamanrasset", "12 - Tébessa", "13 - Tlemcen", "14 - Tiaret", "15 - Tizi Ouzou",
+                      "16 - Alger", "17 - Djelfa", "18 - Jijel", "19 - Sétif", "20 - Saïda",
+                      "21 - Skikda", "22 - Sidi Bel Abbès", "23 - Annaba", "24 - Guelma", "25 - Constantine",
+                      "26 - Médéa", "27 - Mostaganem", "28 - M'Sila", "29 - Mascara", "30 - Ouargla",
+                      "31 - Oran", "32 - El Bayadh", "33 - Illizi", "34 - Bordj Bou Arreridj", "35 - Boumerdès",
+                      "36 - El Tarf", "37 - Tindouf", "38 - Tissemsilt", "39 - El Oued", "40 - Khenchela",
+                      "41 - Souk Ahras", "42 - Tipaza", "43 - Mila", "44 - Aïn Defla", "45 - Naâma",
+                      "46 - Aïn Témouchent", "47 - Ghardaïa", "48 - Relizane", "49 - Timimoun", "50 - Bordj Badji Mokhtar",
+                      "51 - Ouled Djellal", "52 - Béni Abbès", "53 - In Salah", "54 - In Guezzam", "55 - Touggourt",
+                      "56 - Djanet", "57 - El M'Ghair", "58 - El Meniaa"
+                    ].map(w => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Ville / Commune</label>
+                  <input type="text" value={editData.ville} onChange={e => setEditData({ ...editData, ville: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Propriétaire du projet</label>
+                  <input type="text" placeholder="ID du propriétaire (optionnel)" value={editData.responsable} onChange={e => setEditData({ ...editData, responsable: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Date de Création</label>
-                  <input type="date" value={editData.createdAt} onChange={e => setEditData({ ...editData, createdAt: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
+                  <input type="date" value={editData.createdAt} onChange={e => setEditData({ ...editData, createdAt: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none" />
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Technique (séparés par virgule)</label>
-                  <input type="text" value={editData.technique} onChange={e => setEditData({ ...editData, technique: e.target.value })} placeholder="Fay, Arslane, Hamza..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Wilaya</label>
-                  <input type="text" value={editData.wilaya} onChange={e => setEditData({ ...editData, wilaya: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Ville</label>
-                  <input type="text" value={editData.ville} onChange={e => setEditData({ ...editData, ville: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:border-blue-500 outline-none" />
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Collaborateurs techniques</label>
+                  <div className="flex flex-wrap gap-3">
+                    {["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"].map(collab => (
+                      <label key={collab} className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl shadow-sm hover:border-blue-400 transition-colors">
+                        <input 
+                          type="checkbox"
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
+                          checked={editData.technique.includes(collab)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setEditData({...editData, technique: [...editData.technique, collab]});
+                            } else {
+                              setEditData({...editData, technique: editData.technique.filter((c: string) => c !== collab)});
+                            }
+                          }}
+                        />
+                        <span className="text-xs font-bold text-slate-700">{collab}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end pt-6 mt-4 border-t border-slate-100 gap-3">
@@ -764,16 +870,54 @@ export default function ProjectDetails() {
         </div>
       )}
 
-      {/* Billing */}
-      {showBilling && (
+      {/* Documents */}
+      {showBilling && (() => {
+        const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
+        const encaissementPhase = acquisitionContract?.phases?.find(p => p.name === 'Encaissement');
+        const isEncaissementActiveOrDone = encaissementPhase && (encaissementPhase.status === 'ACTIVE' || encaissementPhase.status === 'DONE');
+        const missingAcquisitionDocs = encaissementPhase?.tasks?.filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS') || [];
+
+        return (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-5xl max-h-[90vh] flex flex-col justify-between overflow-hidden">
             <button type="button" onClick={() => setShowBilling(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
             <div className="space-y-1 mb-5">
-              <h3 className="font-extrabold text-slate-900 text-base">Gestion de la Facturation</h3>
+              <h3 className="font-extrabold text-slate-900 text-base">Gestion des Documents Administratifs</h3>
             </div>
             <div className="flex-1 overflow-y-auto pr-2 space-y-8">
-              <form onSubmit={handleAddMaintenance} className="bg-emerald-50/50 border border-emerald-100 p-5 rounded-2xl flex flex-col sm:flex-row gap-4 items-end">
+              
+              {isEncaissementActiveOrDone && (
+                <div className="bg-blue-50/50 border border-blue-100 p-6 rounded-[24px]">
+                  <h4 className="font-extrabold text-blue-900 text-sm mb-4 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-500" />
+                    Acquisition (Phase Encaissement) : Documents requis
+                  </h4>
+                  {missingAcquisitionDocs.length > 0 ? (
+                    <div className="space-y-2">
+                      {missingAcquisitionDocs.map(doc => (
+                        <div key={doc.id} className="bg-white border border-blue-100 p-4 rounded-2xl flex items-center gap-3 shadow-sm">
+                          <div className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
+                          <span className="text-xs font-bold text-slate-700">{doc.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                      <p className="text-xs text-emerald-700 font-bold">
+                        Tous les documents administratifs de l'acquisition ont été traités.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <h4 className="font-extrabold text-emerald-900 text-sm flex items-center gap-2 border-b border-slate-100 pb-2">
+                  <FolderKanban className="w-4 h-4 text-emerald-500" />
+                  Exercices de Maintenance
+                </h4>
+                <form onSubmit={handleAddMaintenance} className="bg-emerald-50/50 border border-emerald-100 p-5 rounded-2xl flex flex-col sm:flex-row gap-4 items-end">
                 <div className="flex-1 space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Année</label>
                   <input type="number" required value={newMaintenanceYear} onChange={e => setNewMaintenanceYear(parseInt(e.target.value))} className="w-full bg-white border border-emerald-200 rounded-xl px-3.5 py-2 text-xs focus:border-emerald-500 outline-none" />
@@ -827,8 +971,10 @@ export default function ProjectDetails() {
               </div>
             </div>
           </div>
+          </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* NEW MODAL: Facturation */}
       {showFacturation && (
@@ -852,6 +998,54 @@ export default function ProjectDetails() {
             <div className="flex justify-end pt-6 mt-4 border-t border-slate-100 gap-3">
               <button type="button" onClick={() => setShowFacturation(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Fermer</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW MODAL: Report & Email */}
+      {reportModalTask && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-lg flex flex-col">
+            <button type="button" onClick={() => setReportModalTask(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50"><X className="w-5 h-5" /></button>
+            <h3 className="font-extrabold text-slate-900 text-xl flex items-center gap-3 mb-5">
+              <FileText className="w-6 h-6 text-blue-500" />
+              Rapport de tâche
+            </h3>
+            
+            <form onSubmit={handleSaveReport} className="space-y-5">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Destinataire (Email)</label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input 
+                    type="email" 
+                    placeholder="ex: direction@client.dz"
+                    value={reportEmail}
+                    onChange={e => setReportEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1.5 font-medium ml-1">Si rempli, l'enregistrement ouvrira votre client mail par défaut avec le rapport.</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Contenu du rapport</label>
+                <textarea 
+                  rows={6}
+                  placeholder="Écrivez votre rapport détaillé ici..."
+                  value={reportModalTask.report}
+                  onChange={e => setReportModalTask({ ...reportModalTask, report: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-medium text-slate-700 resize-none shadow-inner"
+                />
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-100 gap-3">
+                <button type="button" onClick={() => setReportModalTask(null)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors">Annuler</button>
+                <button type="submit" className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md hover:bg-blue-700 transition-colors flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> Sauvegarder {reportEmail && "et envoyer"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
