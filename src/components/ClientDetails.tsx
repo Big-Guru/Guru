@@ -5,6 +5,7 @@ import { Building2, MapPin, Users2, FileText, ArrowLeft, Plus, X, Award, Receipt
 import { calculateAlerts } from '../lib/alerts';
 import { ProductType, ProductVersion } from '../types';
 import { cn } from '../lib/utils';
+import FacturationDossierModal from './FacturationDossierModal';
 
 const ALGERIAN_WILAYAS = [
   "01 - Adrar", "02 - Chlef", "03 - Laghouat", "04 - Oum El Bouaghi", "05 - Batna",
@@ -28,6 +29,7 @@ export default function ClientDetails() {
   const { clients, projects, addProject, deleteProject, dossiersPaiement, addDossierPaiement, updateEncaissement } = useStore();
   const [selectedFusionGroup, setSelectedFusionGroup] = useState<any[] | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [selectedDossierFacturationId, setSelectedDossierFacturationId] = useState<string | null>(null);
   const [newProjectData, setNewProjectData] = useState({
     name: '',
     departement: 'D1',
@@ -540,9 +542,12 @@ export default function ClientDetails() {
                     </div>
 
                     <div className="mt-4 pt-4 border-t border-slate-100 text-right">
-                      <Link to={`/`} className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 uppercase tracking-wide flex items-center justify-end gap-1">
+                      <button 
+                        onClick={() => setSelectedDossierFacturationId(dossier.id)}
+                        className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 uppercase tracking-wide flex items-center justify-end gap-1 ml-auto"
+                      >
                         Ouvrir le dossier <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
-                      </Link>
+                      </button>
                     </div>
                   </div>
                 );
@@ -809,6 +814,18 @@ export default function ClientDetails() {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedDossierFacturationId && (
+        <FacturationDossierModal 
+          dossierId={selectedDossierFacturationId}
+          client={client}
+          encaissements={allEncaissements.filter(e => {
+            const dossier = dossiersPaiement.find(d => d.id === selectedDossierFacturationId);
+            return dossier?.encaissementIds.includes(e.id);
+          })}
+          onClose={() => setSelectedDossierFacturationId(null)}
+        />
       )}
     </div>
   );

@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { Client, Project, Mission } from '../types';
 
 export default function FirebaseSync() {
-  const { setClients, setProjects, setMissions } = useStore();
+  const { setClients, setProjects, setMissions, setDossiersPaiement } = useStore();
 
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
@@ -41,10 +41,21 @@ export default function FirebaseSync() {
         setMissions(missionsList);
       }, (error) => handleFirestoreError(error, OperationType.LIST, 'missions'));
 
+      // Sync Dossiers Paiement
+      const qDossiers = query(collection(db, 'dossiers'));
+      const unsubDossiers = onSnapshot(qDossiers, (snapshot) => {
+        const dossiersList: any[] = [];
+        snapshot.forEach(doc => {
+          dossiersList.push({ id: doc.id, ...doc.data() });
+        });
+        setDossiersPaiement(dossiersList);
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'dossiers'));
+
       return () => {
         unsubClients();
         unsubProjects();
         unsubMissions();
+        unsubDossiers();
       };
     });
 

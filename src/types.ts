@@ -8,12 +8,35 @@ export interface DocumentTrack {
   dateRecup?: string;
 }
 
-export type InvoicingStepStatus = 'PENDING' | 'GENERATED' | 'TO_VERIFY' | 'VALIDATED' | 'RECOVERED';
+export type InvoicingStepStatus = 'PENDING' | 'GENERATED' | 'TO_VERIFY' | 'VALIDATED' | 'DEPOSITED' | 'RECOVERED';
+
+export interface DocumentDraft {
+  documentNumber: string;
+  totalHT: number;
+  totalTVA: number;
+  totalTTC: number;
+  items: Array<{
+    description: string;
+    price: number;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface InvoicingStep {
   status: InvoicingStepStatus;
   date?: string;
   documentId?: string;
+  draft?: DocumentDraft;
+}
+
+export interface DocumentHistoryEvent {
+  id: string;
+  date: string;
+  documentType: 'PROFORMA' | 'FACTURE' | 'BC';
+  action: string;
+  draftSnapshot?: DocumentDraft;
+  user?: string;
 }
 
 export interface EncaissementRecord {
@@ -34,6 +57,7 @@ export interface EncaissementRecord {
   
   isCombined?: boolean;
   combinedWithDossierId?: string;
+  documentHistory?: DocumentHistoryEvent[];
 }
 
 export interface DossierPaiement {

@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote } from 'lucide-react';
-import { ProjectTask, Contract, ProjectContact, DocumentTrack } from '../types';
+import { ProjectTask, Contract, ProjectContact, DocumentTrack, DocumentDraft } from '../types';
+import { generateWordDocument } from '../lib/docxGenerator';
+import { getPrice } from '../lib/pricing';
+import DocumentPreviewModal from './DocumentPreviewModal';
 import { cn } from '../lib/utils';
 
 const getOwnerAvatar = (id: string) => {
@@ -31,7 +34,10 @@ export default function ProjectDetails() {
     addMaintenance,
     deleteMaintenance,
     updateEncaissement,
-    generateMaintenanceEncaissement
+    dissociateDossier,
+    generateMaintenanceEncaissement,
+    addHistoryEvent,
+    addDocumentHistoryEvent
   } = useStore();
 
   const project = projects.find(p => p.id === id);
@@ -44,6 +50,15 @@ export default function ProjectDetails() {
   const [showEditProject, setShowEditProject] = useState(false);
   const [showContractManager, setShowContractManager] = useState(false);
   const [showFacturation, setShowFacturation] = useState(false);
+  const [previewModalConfig, setPreviewModalConfig] = useState<{
+    isOpen: boolean;
+    type: 'PROFORMA' | 'FACTURE';
+    encaissementId?: string;
+    draftSnapshot?: DocumentDraft;
+    isReadOnly?: boolean;
+    readOnlyStatus?: string;
+  }>({ isOpen: false, type: 'PROFORMA' });
+  
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
 
@@ -423,9 +438,33 @@ export default function ProjectDetails() {
               );
             })}
           </div>
+          </div>
         </div>
 
-        {/* Liste des Encaissements (Nouvelle Section) - Repositionnée dans le panneau gauche */}
+        {/* Panneau droit : Historique */}
+        <div className="w-full xl:w-80 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+          <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
+            <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-indigo-600 block shadow-sm" />
+              Historique
+            </h3>
+            <div className="relative pl-5 border-l-2 border-indigo-100 py-2 space-y-4">
+              {historyList.slice().reverse().map(h => (
+                <div key={h.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
+                  <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-white shadow-md block" />
+                  <p className="text-[9px] font-bold text-slate-450 uppercase tracking-wide">{h.date}</p>
+                  <p className="text-xs font-bold text-slate-800 leading-snug">{h.message}</p>
+                </div>
+              ))}
+              {historyList.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun historique.</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col xl:flex-row gap-6 items-start w-full mt-2">
+        <div className="flex-1 w-full space-y-4">
+          {/* Liste des Encaissements */}
         <div className="mt-8 space-y-4">
           <div className="flex justify-between items-center mb-6">
             <div>
@@ -449,6 +488,30 @@ export default function ProjectDetails() {
                 const isDone = enc.status === 'DONE';
                 const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
                 const isPartial = enc.status === 'PARTIAL';
+
+                const getActiveStep = () => {
+                  if (enc.status === 'DONE') return null;
+                  if (enc.facture.status === 'VALIDATED') return { doc: 'Paiement', state: 'En attente' };
+                  if (enc.bc.status === 'RECOVERED') {
+                    const s = enc.facture.status;
+                    if (s === 'PENDING') return { doc: 'Facture', state: 'À générer' };
+                    if (s === 'GENERATED') return { doc: 'Facture', state: 'Générée' };
+                    if (s === 'TO_VERIFY') return { doc: 'Facture', state: 'À vérifier' };
+                    return { doc: 'Facture', state: 'Validée' };
+                  }
+                  if (enc.proforma.status === 'VALIDATED') {
+                    const s = enc.bc.status;
+                    if (s === 'PENDING') return { doc: 'Bon de commande', state: 'En attente' };
+                    return { doc: 'Bon de commande', state: 'Récupéré' };
+                  }
+                  const s = enc.proforma.status;
+                  if (s === 'PENDING') return { doc: 'Proforma', state: 'À générer' };
+                  if (s === 'GENERATED') return { doc: 'Proforma', state: 'Générée' };
+                  if (s === 'TO_VERIFY') return { doc: 'Proforma', state: 'À vérifier' };
+                  return { doc: 'Proforma', state: 'Validée' };
+                };
+                
+                const activeStep = getActiveStep();
 
                 return (
                   <div key={enc.id} className={cn(
@@ -474,9 +537,10 @@ export default function ProjectDetails() {
                           {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}
                         </h4>
                         <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                          <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider">{project.product} {project.version}</span>
+                          <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider whitespace-nowrap">{project.product} {project.version}</span>
                           <span>•</span>
                           <span className={cn(
+                            "whitespace-nowrap",
                             isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
                           )}>
                             Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
@@ -485,9 +549,16 @@ export default function ProjectDetails() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4 w-full md:w-auto">
+                    <div className="flex flex-wrap items-center justify-end gap-3 w-full md:w-auto">
+                      {activeStep && (
+                        <span className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black tracking-widest border border-blue-200 flex items-center gap-1.5 shadow-sm whitespace-nowrap">
+                          <span className="uppercase">{activeStep.doc}</span>
+                          <span className="opacity-40">-</span>
+                          <span className="uppercase text-blue-500">{activeStep.state}</span>
+                        </span>
+                      )}
                       {enc.isCombined && (
-                        <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                        <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm whitespace-nowrap">
                           <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
                         </span>
                       )}
@@ -506,7 +577,7 @@ export default function ProjectDetails() {
                       {isProgress && (
                         <button 
                           onClick={() => setShowFacturation(true)}
-                          className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2"
+                          className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
                         >
                           <Banknote className="w-4 h-4" /> Gérer l'encaissement
                         </button>
@@ -528,24 +599,60 @@ export default function ProjectDetails() {
             </div>
           )}
         </div>
-      </div>
-
-      <div className="w-full xl:w-80 bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
-        <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-indigo-600 block shadow-sm" />
-          Historique
-        </h3>
-        <div className="relative pl-5 border-l-2 border-indigo-100 py-2 space-y-4">
-          {historyList.slice().reverse().map(h => (
-            <div key={h.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
-              <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-white shadow-md block" />
-              <p className="text-[9px] font-bold text-slate-450 uppercase tracking-wide">{h.date}</p>
-              <p className="text-xs font-bold text-slate-800 leading-snug">{h.message}</p>
-            </div>
-          ))}
-          {historyList.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun historique.</p>}
         </div>
-      </div>
+
+        {/* Panneau droit : Historique des Documents */}
+        <div className="w-full xl:w-80 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+          <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
+            <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-blue-600 block shadow-sm" />
+              Historique des Documents
+            </h3>
+            <div className="relative pl-5 border-l-2 border-blue-100 py-2 space-y-4">
+              {(project.encaissements || []).flatMap(e => e.documentHistory || []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice().reverse().map(dh => (
+                <div key={dh.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
+                  <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-blue-500 border-2 border-white shadow-md block" />
+                  <div className="flex justify-between items-start">
+                    <div className="flex flex-col gap-1 w-full">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 uppercase">
+                          {dh.documentType === 'PROFORMA' ? 'Proforma' : 'Facture'} N° {dh.draftSnapshot?.documentNumber || '...'}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-800 leading-snug">
+                        {dh.action}{dh.user ? ` par : ${dh.user}` : ''}
+                      </p>
+                      <p className="text-[10px] font-semibold text-slate-500 mt-0.5">
+                        Le {new Date(dh.date).toLocaleDateString('fr-FR')} à {new Date(dh.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    {dh.draftSnapshot && (
+                      <button
+                        onClick={() => {
+                           const enc = project.encaissements?.find(e => e.documentHistory?.some(h => h.id === dh.id));
+                           if (!enc) return;
+                           setPreviewModalConfig({
+                             isOpen: true,
+                             type: dh.documentType as 'PROFORMA' | 'FACTURE',
+                             encaissementId: enc.id,
+                             draftSnapshot: dh.draftSnapshot,
+                             isReadOnly: true,
+                             readOnlyStatus: dh.action
+                           });
+                        }}
+                        className="ml-3 shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors self-center bg-slate-50 border border-slate-100"
+                        title="Visualiser ce document"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {(!project.encaissements || project.encaissements.flatMap(e => e.documentHistory || []).length === 0) && <p className="text-xs text-slate-450 italic py-4">Aucun document tracé.</p>}
+            </div>
+          </div>
+        </div>
       </div>
 
       {showContractManager && currentContract && (() => {
@@ -1121,7 +1228,21 @@ export default function ProjectDetails() {
                    <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
                       <div className="flex justify-between items-center mb-6">
                         <div>
-                          <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</h4>
+                          <div className="flex items-center gap-3">
+                            <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</h4>
+                            {enc.isCombined && (
+                              <button
+                                onClick={() => {
+                                  if(window.confirm("Êtes-vous sûr de vouloir dissocier ce dossier ? Les encaissements redeviendront indépendants.")) {
+                                    dissociateDossier(enc.combinedWithDossierId || (enc as any).dossierId);
+                                  }
+                                }}
+                                className="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors"
+                              >
+                                Dissocier le dossier
+                              </button>
+                            )}
+                          </div>
                           <span className="text-slate-500 text-xs font-bold mt-1 block">Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
                         </div>
                         <span className={cn(
@@ -1130,69 +1251,129 @@ export default function ProjectDetails() {
                         )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
                       </div>
                       
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+                      <div className="flex flex-col gap-3 mb-6">
                         {/* 1. PROFORMA */}
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3">
-                          <div className="flex items-center gap-2 font-bold text-xs text-slate-700 uppercase"><span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[10px]">1</span> Proforma</div>
+                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                          <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                            <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">1</span>
+                            <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Proforma</span>
+                          </div>
                           <select 
                             value={enc.proforma.status} 
                             onChange={e => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: e.target.value as any } })}
-                            className="w-full text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none"
+                            className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors"
                           >
                             <option value="PENDING">À générer</option>
                             <option value="GENERATED">Générée</option>
                             <option value="TO_VERIFY">À vérifier (DFC)</option>
                             <option value="VALIDATED">Validée</option>
                           </select>
+                          <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
+                            <button 
+                              onClick={() => setPreviewModalConfig({ isOpen: true, type: 'PROFORMA', encaissementId: enc.id })}
+                              className="px-5 py-2.5 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 rounded-xl text-xs font-bold transition-all"
+                            >
+                              {enc.proforma.status === 'PENDING' ? 'Générer' : 'Ouvrir'}
+                            </button>
+                            {enc.proforma.status !== 'PENDING' && (
+                              <button 
+                                onClick={() => {
+                                  if (window.confirm("Voulez-vous vraiment réinitialiser cette proforma ? (Cela effacera le brouillon actuel)")) {
+                                    updateEncaissement(project.id, enc.id, { proforma: { status: 'PENDING', draft: undefined } });
+                                  }
+                                }}
+                                className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
+                                title="Réinitialiser pour forcer une nouvelle génération"
+                              >
+                                Réinitialiser
+                              </button>
+                            )}
+                          </div>
                         </div>
                         
                         {/* 2. BON DE COMMANDE */}
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3">
-                          <div className="flex items-center gap-2 font-bold text-xs text-slate-700 uppercase"><span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[10px]">2</span> Bon Commande</div>
+                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                          <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                            <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">2</span>
+                            <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Bon Commande</span>
+                          </div>
                           <select 
                             value={enc.bc.status} 
                             onChange={e => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: e.target.value as any } })}
-                            className="w-full text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none"
+                            className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
                             disabled={enc.proforma.status !== 'VALIDATED'}
                           >
                             <option value="PENDING">En attente</option>
                             <option value="RECOVERED">Récupéré</option>
                           </select>
+                          <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end min-w-[120px]">
+                            {/* Espace pour alignement si nécessaire */}
+                          </div>
                         </div>
                         
                         {/* 3. FACTURE */}
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3">
-                          <div className="flex items-center gap-2 font-bold text-xs text-slate-700 uppercase"><span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[10px]">3</span> Facture Déf.</div>
+                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                          <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                            <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">3</span>
+                            <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Facture Déf.</span>
+                          </div>
                           <select 
                             value={enc.facture.status} 
                             onChange={e => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: e.target.value as any } })}
-                            className="w-full text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none"
+                            className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-emerald-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
                             disabled={enc.bc.status !== 'RECOVERED'}
                           >
                             <option value="PENDING">À générer</option>
                             <option value="GENERATED">Générée</option>
                             <option value="VALIDATED">Établie et envoyée</option>
                           </select>
+                          <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
+                            <button 
+                              onClick={() => setPreviewModalConfig({ isOpen: true, type: 'FACTURE', encaissementId: enc.id })}
+                              className="px-5 py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:pointer-events-none"
+                              disabled={enc.bc.status !== 'RECOVERED'}
+                            >
+                              {enc.facture.status === 'PENDING' ? 'Générer' : 'Ouvrir'}
+                            </button>
+                            {enc.facture.status !== 'PENDING' && (
+                              <button 
+                                onClick={() => {
+                                  if (window.confirm("Voulez-vous vraiment réinitialiser cette facture ? (Cela effacera le brouillon actuel)")) {
+                                    updateEncaissement(project.id, enc.id, { facture: { status: 'PENDING', draft: undefined } });
+                                  }
+                                }}
+                                className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
+                                title="Réinitialiser pour forcer une nouvelle génération"
+                              >
+                                Réinitialiser
+                              </button>
+                            )}
+                          </div>
                         </div>
                         
                         {/* 4. PAIEMENT */}
-                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex flex-col gap-3">
-                          <div className="flex items-center gap-2 font-bold text-xs text-blue-800 uppercase"><span className="w-5 h-5 rounded-full bg-blue-200 flex items-center justify-center text-[10px]">4</span> Paiement</div>
-                          <div className="flex flex-col gap-2">
+                        <div className="bg-blue-50/50 p-3.5 rounded-xl border border-blue-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                          <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                            <span className="w-6 h-6 rounded-full bg-blue-200 flex items-center justify-center text-[11px] font-bold text-blue-800">4</span>
+                            <span className="font-bold text-xs text-blue-800 uppercase tracking-wider">Paiement</span>
+                          </div>
+                          <div className="flex flex-1 gap-3">
                             <input 
                               type="number" placeholder="Total (DA)" 
                               value={enc.montantTotal || ''} 
                               onChange={e => updateEncaissement(project.id, enc.id, { montantTotal: parseFloat(e.target.value) })}
-                              className="w-full text-xs font-bold bg-white border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500" 
+                              className="w-1/2 text-xs font-bold text-blue-900 bg-white border border-blue-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400" 
                               disabled={enc.facture.status !== 'VALIDATED'}
                             />
                             <input 
                               type="number" placeholder="Encaissé (DA)" 
                               value={enc.montantEncaisse || ''} 
                               onChange={e => updateEncaissement(project.id, enc.id, { montantEncaisse: parseFloat(e.target.value) })}
-                              className="w-full text-xs font-bold bg-white border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500" 
+                              className="w-1/2 text-xs font-bold text-blue-900 bg-white border border-blue-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400" 
                               disabled={enc.facture.status !== 'VALIDATED'}
                             />
+                          </div>
+                          <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end min-w-[120px]">
                             {enc.montantTotal && enc.montantEncaisse !== undefined && (
                               <button 
                                 onClick={() => {
@@ -1209,8 +1390,7 @@ export default function ProjectDetails() {
                                     }
                                   }
                                 }}
-                                disabled={!enc.montantEncaisse || enc.facture.status !== 'VALIDATED'}
-                                className="w-full bg-blue-600 text-white text-[10px] font-bold py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 mt-1"
+                                className="w-full px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/20"
                               >
                                 Valider Paiement
                               </button>
@@ -1284,6 +1464,112 @@ export default function ProjectDetails() {
           </div>
         </div>
       )}
+
+      {previewModalConfig.isOpen && project && client && (() => {
+        const enc = project.encaissements?.find(e => e.id === previewModalConfig.encaissementId);
+        if (!enc) return null;
+        
+        const docObj = previewModalConfig.type === 'PROFORMA' ? enc.proforma : enc.facture;
+
+        let draft = previewModalConfig.draftSnapshot || docObj.draft;
+        const status = previewModalConfig.isReadOnly ? previewModalConfig.readOnlyStatus : docObj.status;
+
+        if (!draft) {
+          let encaissementsToCombine = [enc];
+          const dossierId = enc.combinedWithDossierId || (enc as any).dossierId;
+          if (enc.isCombined && dossierId) {
+             encaissementsToCombine = projects.flatMap(p => p.encaissements || []).filter(e => e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId) || [enc];
+          }
+
+          let totalHT = 0;
+          const items = encaissementsToCombine.map(e => {
+             const p = projects.find(pr => pr.id === e.projectId);
+             const prod = p?.product || project.product;
+             const vers = p?.version || project.version;
+             const price = getPrice(prod, vers, e.mode);
+             totalHT += price;
+             
+             const versionStr = vers ? `, Version ${vers}` : '';
+             const title = `Logiciel ${prod}${versionStr}`;
+             const subtitle = e.mode === 'Acquisition' ? 'Acquisition' : `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
+             const description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle (Heures de bureau, Du Dimanche au Jeudi)\n• Télé-intervention annuelle (Heures de bureau, Du Dimanche au Jeudi)`.trim();
+             
+             return {
+               description,
+               price
+             };
+          });
+
+          const totalTVA = totalHT * 0.19;
+          const totalTTC = totalHT + totalTVA;
+
+          draft = {
+            documentNumber: `DOC-${new Date().getFullYear()}-000`,
+            items,
+            totalHT,
+            totalTVA,
+            totalTTC,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+
+        return (
+          <DocumentPreviewModal
+            isOpen={previewModalConfig.isOpen}
+            onClose={() => setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' })}
+            type={previewModalConfig.type}
+            client={client}
+            project={project}
+            encaissement={enc}
+            draft={draft}
+            status={status === 'PENDING' ? 'GENERATED' : (status || 'GENERATED')}
+            isReadOnly={previewModalConfig.isReadOnly}
+            onSaveDraft={(newDraft) => {
+               if (previewModalConfig.type === 'PROFORMA') {
+                 updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma.status === 'PENDING' ? 'GENERATED' : enc.proforma.status, draft: newDraft } });
+               } else {
+                 updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture.status === 'PENDING' ? 'GENERATED' : enc.facture.status, draft: newDraft } });
+               }
+            }}
+            onSubmitValidation={() => {
+               if (previewModalConfig.type === 'PROFORMA') {
+                 updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: 'TO_VERIFY', draft } });
+                 addHistoryEvent(project.id, `Proforma de l'encaissement ${enc.mode} soumise à validation.`);
+                 addDocumentHistoryEvent(project.id, enc.id, { date: new Date().toISOString(), documentType: 'PROFORMA', action: 'Soumise à validation', draftSnapshot: draft });
+               } else {
+                 updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: 'TO_VERIFY', draft } });
+                 addHistoryEvent(project.id, `Facture de l'encaissement ${enc.mode} soumise à validation.`);
+                 addDocumentHistoryEvent(project.id, enc.id, { date: new Date().toISOString(), documentType: 'FACTURE', action: 'Soumise à validation', draftSnapshot: draft });
+               }
+               setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' });
+            }}
+            onValidate={() => {
+               if (previewModalConfig.type === 'PROFORMA') {
+                 updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: 'VALIDATED', draft } });
+                 addHistoryEvent(project.id, `Proforma de l'encaissement ${enc.mode} validée.`);
+                 addDocumentHistoryEvent(project.id, enc.id, { date: new Date().toISOString(), documentType: 'PROFORMA', action: 'Validée', draftSnapshot: draft });
+               } else {
+                 updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: 'VALIDATED', draft } });
+                 addHistoryEvent(project.id, `Facture de l'encaissement ${enc.mode} validée.`);
+                 addDocumentHistoryEvent(project.id, enc.id, { date: new Date().toISOString(), documentType: 'FACTURE', action: 'Validée', draftSnapshot: draft });
+               }
+            }}
+            onDeposit={() => {
+               if (previewModalConfig.type === 'PROFORMA') {
+                 updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: 'DEPOSITED', draft } });
+                 addHistoryEvent(project.id, `Proforma de l'encaissement ${enc.mode} déposée.`);
+                 addDocumentHistoryEvent(project.id, enc.id, { date: new Date().toISOString(), documentType: 'PROFORMA', action: 'Déposée', draftSnapshot: draft });
+               } else {
+                 updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: 'DEPOSITED', draft } });
+                 addHistoryEvent(project.id, `Facture de l'encaissement ${enc.mode} déposée.`);
+                 addDocumentHistoryEvent(project.id, enc.id, { date: new Date().toISOString(), documentType: 'FACTURE', action: 'Déposée', draftSnapshot: draft });
+               }
+               setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' });
+            }}
+          />
+        );
+      })()}
 
     </div>
   );

@@ -89,7 +89,9 @@ interface AppState {
   addDossierPaiement: (dossier: Omit<DossierPaiement, 'id' | 'createdAt'>) => Promise<string>;
   updateDossierPaiement: (id: string, data: Partial<DossierPaiement>) => void;
   deleteDossierPaiement: (id: string) => void;
+  dissociateDossier: (dossierId: string) => void;
   updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
+  addDocumentHistoryEvent: (projectId: string, encaissementId: string, event: Omit<DocumentHistoryEvent, 'id'>) => void;
   generateMaintenanceEncaissement: (projectId: string) => void;
 }
 
@@ -677,9 +679,72 @@ export const useStore = create<AppState>()(
         const project = state.projects.find(p => p.id === projectId);
         if (!project || !project.encaissements) return;
 
+        const targetEnc = project.encaissements.find(e => e.id === encaissementId);
+        const dossierId = targetEnc?.isCombined ? (targetEnc.combinedWithDossierId || (targetEnc as any).dossierId) : null;
+
+        if (dossierId) {
+          state.projects.forEach(p => {
+             if (!p.encaissements) return;
+             let changed = false;
+             const newEncs = p.encaissements.map(e => {
+                const eDossierId = e.combinedWithDossierId || (e as any).dossierId;
+                if (e.isCombined && eDossierId === dossierId) {
+                  changed = true;
+                  return { ...e, ...data };
+                }
+                return e;
+             });
+             if (changed) {
+               state.updateProject(p.id, { encaissements: newEncs });
+             }
+          });
+          return;
+        }
+
         const updatedEncaissements = project.encaissements.map(e => 
           e.id === encaissementId ? { ...e, ...data } : e
         );
+        state.updateProject(projectId, { encaissements: updatedEncaissements });
+      },
+      addDocumentHistoryEvent: (projectId, encaissementId, event) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.encaissements) return;
+
+        const currentUser = auth.currentUser;
+        const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
+        const newEventBase = { ...event, user: userName };
+
+        const targetEnc = project.encaissements.find(e => e.id === encaissementId);
+        const dossierId = targetEnc?.isCombined ? (targetEnc.combinedWithDossierId || (targetEnc as any).dossierId) : null;
+
+        if (dossierId) {
+          state.projects.forEach(p => {
+             if (!p.encaissements) return;
+             let changed = false;
+             const newEncs = p.encaissements.map(e => {
+                const eDossierId = e.combinedWithDossierId || (e as any).dossierId;
+                if (e.isCombined && eDossierId === dossierId) {
+                  changed = true;
+                  const newHistory = [...(e.documentHistory || []), { ...newEventBase, id: uuidv4() }];
+                  return { ...e, documentHistory: newHistory };
+                }
+                return e;
+             });
+             if (changed) {
+               state.updateProject(p.id, { encaissements: newEncs });
+             }
+          });
+          return;
+        }
+
+        const updatedEncaissements = project.encaissements.map(e => {
+          if (e.id === encaissementId) {
+            const newHistory = [...(e.documentHistory || []), { ...newEventBase, id: uuidv4() }];
+            return { ...e, documentHistory: newHistory };
+          }
+          return e;
+        });
         state.updateProject(projectId, { encaissements: updatedEncaissements });
       },
       generateMaintenanceEncaissement: (projectId) => {
@@ -752,6 +817,46 @@ export const useStore = create<AppState>()(
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'Suppression du dossier de paiement');
         }
+      },
+      dissociateDossier: async (dossierId) => {
+        const state = get();
+        // 1. Remove from all encaissements
+        const newProjects = state.projects.map(p => {
+          if (!p.encaissements) return p;
+          let hasChanges = false;
+          const updatedEncaissements = p.encaissements.map(e => {
+            if (e.combinedWithDossierId === dossierId || e.isCombined) {
+              hasChanges = true;
+              const { isCombined, combinedWithDossierId, ...rest } = e;
+              return rest;
+            }
+            return e;
+          });
+          
+          if (hasChanges) {
+             // Let's do local update, but Firestore update is tricky without a transaction if multiple projects are involved.
+             // We'll trust the state update for UI, and sync or save explicitly if needed, but normally we should persist.
+             const { db } = require('./lib/firebase'); // using require to avoid async in loop if possible, actually we should use state.updateProject
+             // Actually state.updateProject handles firestore update!
+          }
+          return p;
+        });
+        
+        // Let's use updateProject to persist
+        state.projects.forEach(p => {
+          if (p.encaissements?.some(e => e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId)) {
+             const updated = p.encaissements.map(e => {
+                if (e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId) {
+                   return { ...e, isCombined: false, combinedWithDossierId: undefined, dossierId: undefined };
+                }
+                return e;
+             });
+             state.updateProject(p.id, { encaissements: updated });
+          }
+        });
+        
+        // 2. Delete the dossier
+        state.deleteDossierPaiement(dossierId);
       },
       addHistoryEvent: (projectId, message) => {
         const state = get();
