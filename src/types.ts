@@ -8,6 +8,45 @@ export interface DocumentTrack {
   dateRecup?: string;
 }
 
+export type InvoicingStepStatus = 'PENDING' | 'GENERATED' | 'TO_VERIFY' | 'VALIDATED' | 'RECOVERED';
+
+export interface InvoicingStep {
+  status: InvoicingStepStatus;
+  date?: string;
+  documentId?: string;
+}
+
+export interface EncaissementRecord {
+  id: string;
+  projectId: string;
+  mode: 'Acquisition' | 'Maintenance';
+  year?: number; // Seulement pour la Maintenance
+  targetDate: string; // YYYY-MM-DD
+  status: 'UPCOMING' | 'IN_PROGRESS' | 'DONE' | 'PARTIAL';
+  
+  proforma: InvoicingStep;
+  bc: InvoicingStep;
+  facture: InvoicingStep;
+  
+  montantTotal?: number;
+  montantEncaisse?: number;
+  resteDette?: number;
+  
+  isCombined?: boolean;
+  combinedWithDossierId?: string;
+}
+
+export interface DossierPaiement {
+  id: string;
+  clientId: string;
+  projectIds: string[];
+  encaissementIds: string[];
+  status: 'DRAFT' | 'PROFORMA_GENERATED' | 'VALIDATED' | 'FACTURE_GENERATED' | 'DONE';
+  createdAt: string;
+  total: number;
+  encaisse: number;
+}
+
 export interface Client {
   id: string;
   ownerId?: string;
@@ -126,6 +165,8 @@ export interface Project {
   acqEncaissement?: { status: 'PENDING' | 'DONE'; date?: string };
 
   maintenances?: MaintenanceInfo[];
+  
+  encaissements?: EncaissementRecord[];
 }
 
 export interface ClientToVisit {

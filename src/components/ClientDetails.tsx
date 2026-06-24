@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useStore } from '../store';
-import { Building2, MapPin, Users2, FileText, ArrowLeft, Plus, X, Award, Receipt, Clock } from 'lucide-react';
+import { Building2, MapPin, Users2, FileText, ArrowLeft, Plus, X, Award, Receipt, Clock, FolderKanban, Banknote, Calendar, CheckCircle2, Briefcase, Trash2 } from 'lucide-react';
 import { calculateAlerts } from '../lib/alerts';
 import { ProductType, ProductVersion } from '../types';
 import { cn } from '../lib/utils';
@@ -25,7 +25,7 @@ const TECH_COLLABS = ["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"];
 
 export default function ClientDetails() {
   const { id } = useParams<{ id: string }>();
-  const { clients, projects, addProject } = useStore();
+  const { clients, projects, addProject, deleteProject, dossiersPaiement, addDossierPaiement, updateEncaissement } = useStore();
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectData, setNewProjectData] = useState({
     name: '',
@@ -58,6 +58,46 @@ export default function ClientDetails() {
   if (!client) {
     return <div className="p-8 text-center text-slate-500 font-semibold">Client introuvable</div>;
   }
+
+  // LOGIQUE DE FUSION DES ENCAISSEMENTS
+  let allEncaissements: any[] = [];
+  clientProjects.forEach(p => {
+    if (p.encaissements) {
+      p.encaissements.forEach(e => {
+         allEncaissements.push({ ...e, projectName: p.name, product: p.product });
+      });
+    }
+  });
+
+  const eligibleEncaissements = allEncaissements.filter(e => 
+    (e.status === 'IN_PROGRESS' || e.status === 'UPCOMING') && 
+    !e.isCombined
+  );
+
+  const grouped = eligibleEncaissements.reduce((acc, curr) => {
+     const monthYear = curr.targetDate.substring(0, 7);
+     if (!acc[monthYear]) acc[monthYear] = [];
+     acc[monthYear].push(curr);
+     return acc;
+  }, {} as Record<string, any[]>);
+
+  const combinableGroups = Object.entries(grouped).filter(([_, group]) => group.length >= 2);
+
+  const handleCreateDossier = async (group: any[]) => {
+     const newId = crypto.randomUUID();
+     await addDossierPaiement({
+        clientId: client.id,
+        projectIds: Array.from(new Set(group.map(e => e.projectId))),
+        encaissementIds: group.map(e => e.id),
+        status: 'DRAFT',
+        total: 0,
+        encaisse: 0
+     });
+     
+     group.forEach(e => {
+        updateEncaissement(e.projectId, e.id, { isCombined: true, dossierId: newId });
+     });
+  };
 
   const handleAddProject = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,6 +168,32 @@ export default function ClientDetails() {
 
   return (
     <div className="space-y-6">
+      {/* Alertes de fusion */}
+      {combinableGroups.length > 0 && (
+        <div className="space-y-4">
+          {combinableGroups.map(([monthYear, group]) => (
+            <div key={monthYear} className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-3xl p-6 text-white shadow-lg shadow-indigo-500/30 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+              <div className="flex items-start gap-4 relative z-10">
+                 <div className="bg-white/20 p-3 rounded-2xl">
+                   <FolderKanban className="w-8 h-8 text-white" />
+                 </div>
+                 <div>
+                   <h3 className="text-lg font-black tracking-tight mb-1">Opportunité de Fusion !</h3>
+                   <p className="text-indigo-100 text-sm font-medium">Vous avez {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({group.map((g: any) => g.product).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
+                 </div>
+              </div>
+              <button 
+                onClick={() => handleCreateDossier(group)}
+                className="px-6 py-3 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl font-bold shadow-md whitespace-nowrap transition-transform hover:scale-105 relative z-10"
+              >
+                Créer le dossier fusionné
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Header section with back navigation */}
       <div className="flex flex-col gap-4">
         <Link to="/clients" className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors">
@@ -204,7 +270,7 @@ export default function ClientDetails() {
                 <p className="text-xs text-slate-450 mt-1">Créez le premier projet client pour commencer le suivi.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {clientProjects.map((project, index) => {
                   const alerts = calculateAlerts(project);
                   const critCount = alerts.filter(a => a.level === 'CRITICAL').length;
@@ -214,50 +280,91 @@ export default function ClientDetails() {
                     <Link 
                       key={`${project.id}-${index}`} 
                       to={`/projects/${project.id}`}
-                      className="group relative flex flex-col bg-white/60 backdrop-blur-md border border-white/60 rounded-[24px] shadow-lg shadow-slate-200/40 hover:shadow-2xl hover:shadow-blue-500/10 hover:-translate-y-1 hover:border-blue-200/80 transition-all duration-300 overflow-hidden"
+                      className="group relative flex flex-col bg-white rounded-[28px] border border-slate-200/80 shadow-md shadow-slate-200/30 hover:shadow-2xl hover:shadow-blue-500/20 hover:-translate-y-1.5 hover:border-blue-300 transition-all duration-500 overflow-hidden"
                     >
-                      <div className="absolute -right-10 -bottom-10 w-40 h-40 rounded-full blur-3xl z-0 pointer-events-none opacity-0 group-hover:opacity-30 transition-opacity duration-500 bg-indigo-500" />
+                      {/* Decorative Background Elements */}
+                      <div className="absolute -right-8 -top-8 w-40 h-40 bg-gradient-to-br from-blue-100/50 to-purple-100/50 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700 ease-out pointer-events-none" />
+                      <div className="absolute -left-8 -bottom-8 w-40 h-40 bg-gradient-to-br from-emerald-100/30 to-teal-100/30 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700 ease-out pointer-events-none" />
                       
-                      <div className="p-6 flex flex-col flex-1 gap-5 relative z-10">
-                        <div className="flex justify-between items-start gap-4">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <span className={cn("px-3 py-1 rounded-xl text-[10px] font-black uppercase border shadow-sm tracking-widest", getProductBadgeStyle(project.product))}>
-                              {project.product}
-                            </span>
-                            <span className={cn("px-3 py-1 rounded-xl text-[10px] font-black uppercase border shadow-sm tracking-widest", getVersionBadgeStyle(project.version))}>
-                              {project.version}
-                            </span>
-                          </div>
-                          
-                          {/* Alert badges */}
-                          <div className="flex gap-1.5 shrink-0">
-                            {critCount > 0 && (
-                              <span className="bg-red-500 text-white text-[10px] font-black uppercase px-2.5 py-1 rounded-xl shadow-md shadow-red-500/20 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></span>
-                                {critCount}
-                              </span>
-                            )}
-                            {warnCount > 0 && critCount === 0 && (
-                              <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-2.5 py-1 rounded-xl border border-amber-200 shadow-sm">
-                                {warnCount}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-1.5">
-                          <span className="font-extrabold text-lg text-slate-900 tracking-tight group-hover:text-blue-600 transition-colors leading-tight block">
-                            {project.name}
-                          </span>
-                          <span className="text-xs text-slate-500 font-bold block flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5" /> Installé le {new Date(project.installationDate).toLocaleDateString('fr-FR')}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <div className="px-6 py-4 border-t border-slate-200/40 bg-white/40 flex justify-between items-center text-[11px] font-black text-slate-500 uppercase tracking-widest relative z-10 backdrop-blur-sm">
-                         <span>Suivi des documents</span>
-                         <span className="text-blue-600 group-hover:translate-x-1.5 transition-transform bg-blue-50 p-1.5 rounded-lg">&rarr;</span>
+                      <div className="p-6 flex flex-col flex-1 relative z-10 h-full">
+                         {/* Top row: Badges */}
+                         <div className="flex justify-between items-start mb-6">
+                            <div className="flex items-center gap-2">
+                               <span className={cn("px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase border shadow-sm tracking-widest", getProductBadgeStyle(project.product))}>
+                                 {project.product}
+                               </span>
+                               <span className={cn("px-2.5 py-0.5 rounded-lg text-[8px] font-bold uppercase border tracking-widest", getVersionBadgeStyle(project.version))}>
+                                 {project.version}
+                               </span>
+                            </div>
+                            
+                            {/* Alert badges & Delete Action */}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex gap-1.5">
+                                {critCount > 0 && (
+                                  <span className="bg-red-500 text-white text-[10px] font-black uppercase px-2.5 py-1 rounded-xl shadow-md shadow-red-500/20 flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></span>
+                                    {critCount}
+                                  </span>
+                                )}
+                                {warnCount > 0 && critCount === 0 && (
+                                  <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-2.5 py-1 rounded-xl border border-amber-200 shadow-sm">
+                                    {warnCount}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (window.confirm('Voulez-vous vraiment supprimer ce projet ? Cette action est irréversible.')) {
+                                    deleteProject(project.id);
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                title="Supprimer le projet"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                         </div>
+
+                         {/* Title */}
+                         <h3 className="font-extrabold text-xl leading-tight text-slate-900 tracking-tight group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-blue-600 group-hover:to-indigo-600 transition-all duration-300 mb-2">
+                           {project.name}
+                         </h3>
+
+                         {/* Installation Date */}
+                         <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 mb-6 group-hover:text-slate-500 transition-colors">
+                            <Clock className="w-3.5 h-3.5" />
+                            Installé le {new Date(project.installationDate).toLocaleDateString('fr-FR')}
+                         </div>
+
+                         {/* Bottom Section: Minimalist */}
+                         <div className="mt-auto pt-4 border-t border-slate-100/50">
+                           <div className="text-sm font-extrabold text-slate-800">
+                             {project.contracts?.find(c => c.status === 'ACTIVE')?.mode || project.contracts?.[0]?.mode || 'Acquisition'}
+                           </div>
+                           <div className="flex items-center gap-2 mt-1">
+                             <span className="text-xs font-bold text-slate-500">
+                               {(() => {
+                                 const activeContract = project.contracts?.find(c => c.status === 'ACTIVE') || project.contracts?.[0];
+                                 const activePhase = activeContract?.phases?.find(p => p.status === 'ACTIVE' || p.status === 'PENDING') || activeContract?.phases?.[0];
+                                 return activePhase?.name || 'Non définie';
+                               })()}
+                             </span>
+                             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                             <span className={cn(
+                               "px-1.5 py-0.5 rounded-md uppercase tracking-wider text-[9px] font-black",
+                               project.status === 'Actif' ? "bg-emerald-50 text-emerald-600" :
+                               project.status === 'Effectué' ? "bg-blue-50 text-blue-600" :
+                               project.status === 'Suspendu' ? "bg-amber-50 text-amber-600" :
+                               "bg-slate-50 text-slate-500"
+                             )}>
+                               {project.status}
+                             </span>
+                           </div>
+                         </div>
                       </div>
                     </Link>
                   );
@@ -267,6 +374,152 @@ export default function ClientDetails() {
           </div>
         </div>
       </div>
+
+      {/* Liste des Encaissements Globaux du Client */}
+      <div className="mt-8 space-y-4">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="font-extrabold text-xl text-slate-900 flex items-center gap-3">
+              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-8 h-8 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
+                <Banknote className="w-4 h-4 text-white" />
+              </div>
+              Tous les Encaissements du Client
+            </h3>
+            <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Vision globale de toutes les acquisitions et maintenances</p>
+          </div>
+        </div>
+
+        {allEncaissements.length === 0 ? (
+          <div className="text-center py-10 bg-slate-50/50 rounded-3xl border border-slate-100">
+            <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500 font-bold">Aucun encaissement programmé.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {[...allEncaissements].sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime()).map(enc => {
+              const isUpcoming = enc.status === 'UPCOMING';
+              const isDone = enc.status === 'DONE';
+              const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
+              const isPartial = enc.status === 'PARTIAL';
+
+              return (
+                <div key={enc.id} className={cn(
+                  "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
+                  isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
+                  isDone ? "bg-emerald-50 border-emerald-200/60" :
+                  "bg-white border-blue-200/60 shadow-md shadow-blue-500/5"
+                )}>
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
+                      isUpcoming ? "bg-slate-200 text-slate-500" :
+                      isDone ? "bg-emerald-100 text-emerald-600" :
+                      "bg-blue-100 text-blue-600"
+                    )}>
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className={cn(
+                        "font-extrabold text-base mb-1",
+                        isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
+                      )}>
+                        {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} <span className="text-slate-400 font-medium ml-1">— {enc.projectName}</span>
+                      </h4>
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                        <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider">{enc.product}</span>
+                        <span>•</span>
+                        <span className={cn(
+                          isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
+                        )}>
+                          Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 w-full md:w-auto">
+                    {enc.isCombined && (
+                      <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                        <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
+                      </span>
+                    )}
+
+                    {(isDone || isPartial) && enc.montantTotal && (
+                      <div className="text-right">
+                        <div className="text-xs font-extrabold text-slate-800">
+                          {enc.montantEncaisse?.toLocaleString('fr-DZ')} DA / {enc.montantTotal.toLocaleString('fr-DZ')} DA
+                        </div>
+                        {isPartial && enc.resteDette && (
+                          <div className="text-[10px] font-bold text-red-500 mt-0.5">Dette reportée: {enc.resteDette.toLocaleString('fr-DZ')} DA</div>
+                        )}
+                      </div>
+                    )}
+
+                    {isProgress && (
+                      <Link 
+                        to={`/projects/${enc.projectId}`}
+                        className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2"
+                      >
+                        <Banknote className="w-4 h-4" /> Gérer dans le projet
+                      </Link>
+                    )}
+                    {isDone && (
+                      <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4" /> Clôturé
+                      </span>
+                    )}
+                    {isUpcoming && (
+                      <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
+                        <Clock className="w-4 h-4" /> En attente
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Dossiers de paiement (historique) */}
+      {dossiersPaiement && dossiersPaiement.filter(d => d.clientId === id).length > 0 && (
+        <div className="bg-white/60 backdrop-blur-md rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/40 overflow-hidden flex flex-col mt-8">
+          <div className="px-6 py-5 border-b border-slate-200/40 bg-white/40 flex items-center justify-between relative z-10">
+            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-widest flex items-center gap-2.5">
+              <FolderKanban className="w-5 h-5 text-purple-600" />
+              Dossiers de Paiement Combinés
+            </h3>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {dossiersPaiement.filter(d => d.clientId === id).map((dossier) => (
+                <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200">
+                      Dossier Fusionné
+                    </span>
+                    <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
+                  </div>
+                  <h4 className="font-extrabold text-slate-800 text-sm mb-4">
+                    Contient {dossier.encaissementIds.length} encaissements
+                  </h4>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center text-xs font-bold text-slate-500">
+                      <span>Statut:</span>
+                      <span className="text-slate-800">{dossier.status}</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-100 text-right">
+                    <Link to={`/`} className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 uppercase tracking-wide">
+                      Ouvrir le dossier &rarr;
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNewProject && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">

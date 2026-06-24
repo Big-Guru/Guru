@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote } from 'lucide-react';
 import { ProjectTask, Contract, ProjectContact, DocumentTrack } from '../types';
@@ -18,16 +18,20 @@ const getOwnerAvatar = (id: string) => {
 
 export default function ProjectDetails() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const {
     projects,
     clients,
     updateProject,
+    deleteProject,
     addContract,
     updateContractStatus,
     updateTaskInContract,
     togglePhaseStatus,
     addMaintenance,
-    deleteMaintenance
+    deleteMaintenance,
+    updateEncaissement,
+    generateMaintenanceEncaissement
   } = useStore();
 
   const project = projects.find(p => p.id === id);
@@ -209,7 +213,8 @@ export default function ProjectDetails() {
   };
 
   return (
-    <div className="flex flex-col xl:flex-row gap-6 items-start animate-fade-in pb-12 w-full max-w-7xl mx-auto">
+    <div className="animate-fade-in pb-12 w-full max-w-7xl mx-auto flex flex-col gap-8">
+      <div className="flex flex-col xl:flex-row gap-6 items-start w-full">
       {/* LEFT PANEL */}
       <div className="flex-1 w-full space-y-6">
         <Link to="/projects" className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
@@ -239,6 +244,17 @@ export default function ProjectDetails() {
 
               <button onClick={() => setShowEditProject(true)} className="bg-blue-50/50 hover:bg-blue-100/50 text-blue-600 border border-blue-100 hover:border-blue-200 px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-all flex items-center gap-2">
                 <Edit3 className="w-4 h-4" /> Modifier
+              </button>
+              <button 
+                onClick={() => {
+                  if (window.confirm('Voulez-vous vraiment supprimer ce projet ? Cette action est irréversible.')) {
+                    deleteProject(project.id);
+                    navigate(`/clients/${project.clientId}`);
+                  }
+                }}
+                className="bg-red-50/50 hover:bg-red-100/50 text-red-600 border border-red-100 hover:border-red-200 px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-all flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" /> Supprimer
               </button>
             </div>
             </div>
@@ -301,9 +317,8 @@ export default function ProjectDetails() {
 
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-blue-500 block shadow-sm" />
-              Processus du Projet
+            <h3 className="font-extrabold text-xl text-slate-900">
+              Modes
             </h3>
           </div>
 
@@ -336,11 +351,11 @@ export default function ProjectDetails() {
                       setShowContractManager(true);
                     }}
                     className={cn(
-                      "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-300 relative border overflow-hidden",
+                      "group shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-300 relative border overflow-hidden",
                       colorClasses,
-                      isActive ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02]" : "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]",
-                      isPending && "grayscale opacity-70",
-                      isDone && "opacity-90 grayscale-[30%]"
+                      isActive ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02] grayscale-0 opacity-100" : "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]",
+                      isPending && !isActive && "grayscale opacity-70 hover:grayscale-0 hover:opacity-100",
+                      isDone && !isActive && "opacity-90 grayscale-[30%] hover:grayscale-0"
                     )}
                   >
                     {/* Subtle glow for active card */}
@@ -409,6 +424,110 @@ export default function ProjectDetails() {
             })}
           </div>
         </div>
+
+        {/* Liste des Encaissements (Nouvelle Section) - Repositionnée dans le panneau gauche */}
+        <div className="mt-8 space-y-4">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h3 className="font-extrabold text-xl text-slate-900">
+                Échéancier des Encaissements
+              </h3>
+              <p className="text-slate-500 text-sm mt-1 font-semibold">Suivi automatisé des acquisitions et maintenances</p>
+            </div>
+          </div>
+
+          {(!project.encaissements || project.encaissements.length === 0) ? (
+            <div className="text-center py-10 bg-slate-50/50 rounded-3xl border border-slate-100">
+              <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+              <p className="text-slate-500 font-bold">Aucun encaissement programmé.</p>
+              <p className="text-slate-400 text-sm mt-1">Validez la tâche "Formation" dans l'Acquisition pour générer l'échéancier initial.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {[...project.encaissements].sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime()).map(enc => {
+                const isUpcoming = enc.status === 'UPCOMING';
+                const isDone = enc.status === 'DONE';
+                const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
+                const isPartial = enc.status === 'PARTIAL';
+
+                return (
+                  <div key={enc.id} className={cn(
+                    "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
+                    isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
+                    isDone ? "bg-emerald-50 border-emerald-200/60" :
+                    "bg-white border-blue-200/60 shadow-md shadow-blue-500/5"
+                  )}>
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
+                        isUpcoming ? "bg-slate-200 text-slate-500" :
+                        isDone ? "bg-emerald-100 text-emerald-600" :
+                        "bg-blue-100 text-blue-600"
+                      )}>
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className={cn(
+                          "font-extrabold text-base mb-1",
+                          isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
+                        )}>
+                          {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                          <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider">{project.product} {project.version}</span>
+                          <span>•</span>
+                          <span className={cn(
+                            isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
+                          )}>
+                            Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 w-full md:w-auto">
+                      {enc.isCombined && (
+                        <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                          <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
+                        </span>
+                      )}
+
+                      {(isDone || isPartial) && enc.montantTotal && (
+                        <div className="text-right">
+                          <div className="text-xs font-extrabold text-slate-800">
+                            {enc.montantEncaisse?.toLocaleString('fr-DZ')} DA / {enc.montantTotal.toLocaleString('fr-DZ')} DA
+                          </div>
+                          {isPartial && enc.resteDette && (
+                            <div className="text-[10px] font-bold text-red-500 mt-0.5">Dette reportée: {enc.resteDette.toLocaleString('fr-DZ')} DA</div>
+                          )}
+                        </div>
+                      )}
+
+                      {isProgress && (
+                        <button 
+                          onClick={() => setShowFacturation(true)}
+                          className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2"
+                        >
+                          <Banknote className="w-4 h-4" /> Gérer l'encaissement
+                        </button>
+                      )}
+                      {isDone && (
+                        <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4" /> Clôturé
+                        </span>
+                      )}
+                      {isUpcoming && (
+                        <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
+                          <Clock className="w-4 h-4" /> En attente
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="w-full xl:w-80 bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
@@ -426,6 +545,7 @@ export default function ProjectDetails() {
           ))}
           {historyList.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun historique.</p>}
         </div>
+      </div>
       </div>
 
       {showContractManager && currentContract && (() => {
@@ -633,7 +753,7 @@ export default function ProjectDetails() {
              )}
              
              {/* Bouton pour clôturer ou rouvrir la phase */}
-             {(currentPhase.tasks || []).length > 0 && (
+             {currentPhase && (currentPhase.tasks || []).length > 0 && (
                <div className="mt-8 flex justify-center border-t border-slate-100/50 pt-6 relative z-10">
                  <button
                    onClick={() => togglePhaseStatus(project.id, currentContract.id, currentPhase.id)}
@@ -654,6 +774,7 @@ export default function ProjectDetails() {
         </div>
         );
       })()}
+
 
       {/* Edit Project (z-50) */}
       {showEditProject && (
@@ -989,10 +1110,124 @@ export default function ProjectDetails() {
               <p className="text-slate-500 text-xs font-bold">Acquisition et Maintenances</p>
             </div>
             
-            <div className="flex-1 overflow-y-auto pr-2">
-              <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-8 text-center">
-                <p className="text-slate-500 text-sm font-bold">L'espace pour générer les factures d'encaissement sera affiché ici.</p>
-              </div>
+            <div className="flex-1 overflow-y-auto pr-2 space-y-6">
+              {(!project.encaissements || project.encaissements.filter(e => e.status === 'IN_PROGRESS' || e.status === 'PARTIAL').length === 0) ? (
+                <div className="bg-slate-50/50 border border-slate-100 rounded-3xl p-10 text-center">
+                  <Banknote className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                  <p className="text-slate-500 text-sm font-bold">Aucun encaissement en cours ou en attente d'action.</p>
+                </div>
+              ) : (
+                project.encaissements.filter(e => e.status === 'IN_PROGRESS' || e.status === 'PARTIAL').map(enc => (
+                   <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</h4>
+                          <span className="text-slate-500 text-xs font-bold mt-1 block">Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+                        </div>
+                        <span className={cn(
+                          "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
+                          enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                        )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+                        {/* 1. PROFORMA */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3">
+                          <div className="flex items-center gap-2 font-bold text-xs text-slate-700 uppercase"><span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[10px]">1</span> Proforma</div>
+                          <select 
+                            value={enc.proforma.status} 
+                            onChange={e => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: e.target.value as any } })}
+                            className="w-full text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none"
+                          >
+                            <option value="PENDING">À générer</option>
+                            <option value="GENERATED">Générée</option>
+                            <option value="TO_VERIFY">À vérifier (DFC)</option>
+                            <option value="VALIDATED">Validée</option>
+                          </select>
+                        </div>
+                        
+                        {/* 2. BON DE COMMANDE */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3">
+                          <div className="flex items-center gap-2 font-bold text-xs text-slate-700 uppercase"><span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[10px]">2</span> Bon Commande</div>
+                          <select 
+                            value={enc.bc.status} 
+                            onChange={e => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: e.target.value as any } })}
+                            className="w-full text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none"
+                            disabled={enc.proforma.status !== 'VALIDATED'}
+                          >
+                            <option value="PENDING">En attente</option>
+                            <option value="RECOVERED">Récupéré</option>
+                          </select>
+                        </div>
+                        
+                        {/* 3. FACTURE */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3">
+                          <div className="flex items-center gap-2 font-bold text-xs text-slate-700 uppercase"><span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[10px]">3</span> Facture Déf.</div>
+                          <select 
+                            value={enc.facture.status} 
+                            onChange={e => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: e.target.value as any } })}
+                            className="w-full text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none"
+                            disabled={enc.bc.status !== 'RECOVERED'}
+                          >
+                            <option value="PENDING">À générer</option>
+                            <option value="GENERATED">Générée</option>
+                            <option value="VALIDATED">Établie et envoyée</option>
+                          </select>
+                        </div>
+                        
+                        {/* 4. PAIEMENT */}
+                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex flex-col gap-3">
+                          <div className="flex items-center gap-2 font-bold text-xs text-blue-800 uppercase"><span className="w-5 h-5 rounded-full bg-blue-200 flex items-center justify-center text-[10px]">4</span> Paiement</div>
+                          <div className="flex flex-col gap-2">
+                            <input 
+                              type="number" placeholder="Total (DA)" 
+                              value={enc.montantTotal || ''} 
+                              onChange={e => updateEncaissement(project.id, enc.id, { montantTotal: parseFloat(e.target.value) })}
+                              className="w-full text-xs font-bold bg-white border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500" 
+                              disabled={enc.facture.status !== 'VALIDATED'}
+                            />
+                            <input 
+                              type="number" placeholder="Encaissé (DA)" 
+                              value={enc.montantEncaisse || ''} 
+                              onChange={e => updateEncaissement(project.id, enc.id, { montantEncaisse: parseFloat(e.target.value) })}
+                              className="w-full text-xs font-bold bg-white border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500" 
+                              disabled={enc.facture.status !== 'VALIDATED'}
+                            />
+                            {enc.montantTotal && enc.montantEncaisse !== undefined && (
+                              <button 
+                                onClick={() => {
+                                  const total = enc.montantTotal || 0;
+                                  const encaisse = enc.montantEncaisse || 0;
+                                  if (encaisse >= total) {
+                                    updateEncaissement(project.id, enc.id, { status: 'DONE', resteDette: 0 });
+                                    if (enc.mode === 'Maintenance') generateMaintenanceEncaissement(project.id);
+                                  } else {
+                                    const dette = total - encaisse;
+                                    if (confirm(`Paiement partiel détecté. Une dette de ${dette} DA sera générée et reportée. Confirmer ?`)) {
+                                      updateEncaissement(project.id, enc.id, { status: 'PARTIAL', resteDette: dette });
+                                      if (enc.mode === 'Maintenance') generateMaintenanceEncaissement(project.id);
+                                    }
+                                  }
+                                }}
+                                disabled={!enc.montantEncaisse || enc.facture.status !== 'VALIDATED'}
+                                className="w-full bg-blue-600 text-white text-[10px] font-bold py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 mt-1"
+                              >
+                                Valider Paiement
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {enc.resteDette ? (
+                        <div className="bg-red-50 text-red-700 text-xs font-bold p-3 rounded-xl border border-red-100 flex items-center justify-between">
+                          <span>Dette générée reportée à l'année suivante :</span>
+                          <span>{enc.resteDette.toLocaleString()} DA</span>
+                        </div>
+                      ) : null}
+                   </div>
+                ))
+              )}
             </div>
             
             <div className="flex justify-end pt-6 mt-4 border-t border-slate-100 gap-3">

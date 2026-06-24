@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import { Client, Project, MaintenanceInfo, Mission, Phase, ProjectTask } from './types';
+import { Client, Project, MaintenanceInfo, Mission, Phase, ProjectTask, DossierPaiement, EncaissementRecord } from './types';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
@@ -84,6 +84,13 @@ interface AppState {
   addMission: (mission: Omit<Mission, 'id'>) => void;
   updateMission: (id: string, data: Partial<Mission>) => void;
   deleteMission: (id: string) => void;
+  dossiersPaiement: DossierPaiement[];
+  setDossiersPaiement: (dossiers: DossierPaiement[]) => void;
+  addDossierPaiement: (dossier: Omit<DossierPaiement, 'id' | 'createdAt'>) => void;
+  updateDossierPaiement: (id: string, data: Partial<DossierPaiement>) => void;
+  deleteDossierPaiement: (id: string) => void;
+  updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
+  generateMaintenanceEncaissement: (projectId: string) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -92,9 +99,11 @@ export const useStore = create<AppState>()(
       clients: [],
       projects: [],
       missions: [],
+      dossiersPaiement: [],
       setClients: (clients) => set({ clients }),
       setProjects: (projects) => set({ projects }),
       setMissions: (missions) => set({ missions }),
+      setDossiersPaiement: (dossiersPaiement) => set({ dossiersPaiement }),
       addClient: async (clientData) => {
         const id = uuidv4();
         const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
@@ -251,14 +260,14 @@ export const useStore = create<AppState>()(
         });
       },
       updateProject: async (id, data) => {
+        set((state) => ({
+          projects: state.projects.map((p) => (p.id === id ? { ...p, ...data } : p)),
+        }));
         try {
           await setDoc(doc(db, 'projects', id), data, { merge: true });
         } catch (e) {
           handleFirestoreError(e, OperationType.UPDATE, `projects/${id}`);
         }
-        set((state) => ({
-          projects: state.projects.map((p) => (p.id === id ? { ...p, ...data } : p)),
-        }));
       },
       addContract: (projectId, contractData) => {
         const state = get();
@@ -472,9 +481,9 @@ export const useStore = create<AppState>()(
           const adaptPhase = acqContract.phases.find(ph => ph.name === 'Adaptation');
           if (adaptPhase) {
             const formationTask = adaptPhase.tasks.find(t => t.name.includes('Formation'));
-            if (formationTask && formationTask.status === 'DONE') {
+            if ((formationTask && formationTask.status === 'DONE') || adaptPhase.status === 'DONE') {
               // Si la tâche a une date, l'utiliser, sinon utiliser la date d'aujourd'hui
-              formationDoneDate = formationTask.date ? new Date(formationTask.date) : new Date();
+              formationDoneDate = (formationTask && formationTask.date) ? new Date(formationTask.date) : new Date();
             }
           }
         }
@@ -517,8 +526,58 @@ export const useStore = create<AppState>()(
           }
         }
 
+        // --- NOUVEAU LOGIQUE : GÉNÉRATION DES ENCAISSEMENTS ---
+        let currentEncaissements = [...(project.encaissements || [])];
+        if (formationDoneDate) {
+          const acqTargetDate = new Date(formationDoneDate);
+          acqTargetDate.setMonth(acqTargetDate.getMonth() + 6);
+          
+          const maintTargetDate = new Date(formationDoneDate);
+          maintTargetDate.setMonth(maintTargetDate.getMonth() + 18);
+
+          // Vérifier si Acquisition Encaissement existe
+          if (!currentEncaissements.find(e => e.mode === 'Acquisition')) {
+            currentEncaissements.push({
+              id: uuidv4(),
+              projectId,
+              mode: 'Acquisition',
+              targetDate: acqTargetDate.toISOString().split('T')[0],
+              status: acqTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
+              proforma: { status: 'PENDING' },
+              bc: { status: 'PENDING' },
+              facture: { status: 'PENDING' }
+            });
+            hasChanges = true;
+          }
+
+          // Vérifier si Maintenance 1 Encaissement existe (Year 1)
+          if (!currentEncaissements.find(e => e.mode === 'Maintenance' && e.year === 1)) {
+            currentEncaissements.push({
+              id: uuidv4(),
+              projectId,
+              mode: 'Maintenance',
+              year: 1,
+              targetDate: maintTargetDate.toISOString().split('T')[0],
+              status: maintTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
+              proforma: { status: 'PENDING' },
+              bc: { status: 'PENDING' },
+              facture: { status: 'PENDING' }
+            });
+            hasChanges = true;
+          }
+          
+          // Maj des statuts si les dates sont passées pour les UPCOMING existants
+          currentEncaissements = currentEncaissements.map(enc => {
+            if (enc.status === 'UPCOMING' && new Date(enc.targetDate) <= new Date()) {
+              hasChanges = true;
+              return { ...enc, status: 'IN_PROGRESS' };
+            }
+            return enc;
+          });
+        }
+
         if (hasChanges) {
-          state.updateProject(projectId, { contracts: updatedContracts });
+          state.updateProject(projectId, { contracts: updatedContracts, encaissements: currentEncaissements });
         }
       },
       addProjectContact: (projectId, contactData) => {
@@ -602,6 +661,85 @@ export const useStore = create<AppState>()(
         ];
 
         state.updateProject(projectId, { documents, history: newHistory });
+      },
+      updateEncaissement: (projectId, encaissementId, data) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.encaissements) return;
+
+        const updatedEncaissements = project.encaissements.map(e => 
+          e.id === encaissementId ? { ...e, ...data } : e
+        );
+        state.updateProject(projectId, { encaissements: updatedEncaissements });
+      },
+      generateMaintenanceEncaissement: (projectId) => {
+        // Crée l'encaissement de la maintenance pour l'année suivante (N+1)
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.encaissements) return;
+        
+        const maintenances = project.encaissements.filter(e => e.mode === 'Maintenance');
+        if (maintenances.length === 0) return;
+        
+        // Trouver la dernière
+        const lastMaint = maintenances.reduce((prev, current) => ((prev.year || 1) > (current.year || 1)) ? prev : current);
+        
+        const nextTargetDate = new Date(lastMaint.targetDate);
+        nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
+        
+        const newEncaissement: EncaissementRecord = {
+          id: uuidv4(),
+          projectId,
+          mode: 'Maintenance',
+          year: (lastMaint.year || 1) + 1,
+          targetDate: nextTargetDate.toISOString().split('T')[0],
+          status: nextTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
+          proforma: { status: 'PENDING' },
+          bc: { status: 'PENDING' },
+          facture: { status: 'PENDING' }
+        };
+        
+        state.updateProject(projectId, { encaissements: [...project.encaissements, newEncaissement] });
+      },
+      addDossierPaiement: async (dossierData) => {
+        const id = uuidv4();
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+        const newDossier: DossierPaiement = {
+          ...dossierData,
+          id,
+          createdAt: new Date().toISOString()
+        };
+        try {
+          await setDoc(doc(db, 'dossiers', id), newDossier);
+          set((state) => ({ dossiersPaiement: [...state.dossiersPaiement, newDossier] }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, 'Création du dossier de paiement');
+        }
+      },
+      updateDossierPaiement: async (id, data) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, updateDoc } = await import('firebase/firestore');
+        try {
+          await updateDoc(doc(db, 'dossiers', id), data);
+          set((state) => ({
+            dossiersPaiement: state.dossiersPaiement.map(d => d.id === id ? { ...d, ...data } : d)
+          }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, 'Mise à jour du dossier de paiement');
+        }
+      },
+      deleteDossierPaiement: async (id) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        try {
+          await deleteDoc(doc(db, 'dossiers', id));
+          set((state) => ({
+            dossiersPaiement: state.dossiersPaiement.filter(d => d.id !== id)
+          }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, 'Suppression du dossier de paiement');
+        }
       },
       addHistoryEvent: (projectId, message) => {
         const state = get();
