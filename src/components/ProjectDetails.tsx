@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power } from 'lucide-react';
@@ -68,7 +68,12 @@ export default function ProjectDetails() {
     
     const candidates: Array<{ type: 'DOSSIER' | 'SINGLE', id: string, name: string, projectId?: string }> = [];
     
-    const activeDossiers = dossiersPaiement.filter(d => d.clientId === project.clientId && d.status !== 'DONE');
+    const activeDossiers = dossiersPaiement.filter(d => 
+       d.clientId === project.clientId && 
+       d.status !== 'DONE' && 
+       d.encaissementIds && 
+       d.encaissementIds.some(eid => projects.some(p => p.encaissements?.some(e => e.id === eid)))
+    );
     activeDossiers.forEach(d => {
       candidates.push({ type: 'DOSSIER', id: d.id, name: `Dossier fusionné existant (Créé le ${new Date(d.createdAt).toLocaleDateString('fr-FR')})` });
     });
@@ -89,6 +94,35 @@ export default function ProjectDetails() {
 
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
+
+  // Self-healing logic for Maintenance contract
+  useEffect(() => {
+    if (!project || !project.encaissements || !project.contracts) return;
+    const maintEnc = project.encaissements.find(e => e.mode === 'Maintenance' && (e.status === 'IN_PROGRESS' || e.status === 'PARTIAL'));
+    const maintContract = project.contracts.find(c => c.mode === 'Maintenance');
+    
+    if (maintEnc && maintContract) {
+      let needsFix = false;
+      const updatedContracts = project.contracts.map(c => {
+        if (c.mode === 'Maintenance') {
+          if (c.status === 'PENDING' || c.startDate !== maintEnc.targetDate) {
+            needsFix = true;
+            return {
+              ...c,
+              status: 'ACTIVE' as const,
+              startDate: maintEnc.targetDate,
+              phases: c.phases.map((ph, idx) => idx === 0 ? { ...ph, status: 'ACTIVE' as const } : ph)
+            };
+          }
+        }
+        return c;
+      });
+
+      if (needsFix) {
+        updateProject(project.id, { contracts: updatedContracts });
+      }
+    }
+  }, [project, updateProject]);
 
   const [newContractName, setNewContractName] = useState('');
   const [newContractMode, setNewContractMode] = useState('Acquisition');
@@ -364,107 +398,148 @@ export default function ProjectDetails() {
               Modes
             </h3>
           </div>
-
-          <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-8 px-4 scrollbar-hide">
-            {contractsList.map((card, index) => {
-              const isActive = selectedContractId ? card.id === selectedContractId : currentContract?.id === card.id;
-              const isPending = card.status === 'PENDING';
-              const isDone = card.status === 'DONE' || card.status === 'ABANDONED';
-              
-              const activePhaseIndex = card.phases ? card.phases.findIndex(p => p.status !== 'DONE') : -1;
-              const actualPhaseIndex = activePhaseIndex === -1 && card.phases && card.phases.length > 0 ? card.phases.length - 1 : Math.max(0, activePhaseIndex);
-              const activePhase = card.phases?.[actualPhaseIndex];
-              const currentPhaseCount = card.phases && card.phases.length > 0 ? actualPhaseIndex + 1 : 0;
-              const totalPhasesCount = card.phases?.length || 0;
-
-              let colorClasses = "";
-              if (card.mode === 'Acquisition') {
-                colorClasses = isActive ? "bg-blue-50/90 backdrop-blur-xl border-blue-200/60 shadow-blue-500/10" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-blue-50/90 hover:border-blue-200/60";
-              } else if (card.mode === 'Maintenance offerte') {
-                colorClasses = isActive ? "bg-red-50/90 backdrop-blur-xl border-red-200/60 shadow-red-500/10" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-red-50/90 hover:border-red-200/60";
-              } else {
-                colorClasses = isActive ? "bg-emerald-50/90 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10" : "bg-white/90 backdrop-blur-xl border-slate-200/60 hover:bg-emerald-50/90 hover:border-emerald-200/60";
+          <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-8 px-4 scrollbar-hide relative">
+            {(() => {
+              let splitIndex = -1;
+              for (let i = contractsList.length - 1; i >= 0; i--) {
+                if (contractsList[i].status === 'ACTIVE') {
+                  splitIndex = i;
+                  break;
+                }
               }
+              if (splitIndex === -1) {
+                splitIndex = contractsList.findIndex(c => c.status !== 'DONE' && c.status !== 'ABANDONED');
+              }
+              if (splitIndex === -1) {
+                splitIndex = contractsList.length; // stack everything if all done
+              }
+              
+              const pastContracts = contractsList.filter((c, idx) => idx < splitIndex);
+              const activeContracts = contractsList.filter((c, idx) => idx >= splitIndex);
 
-              return (
-                  <button
-                    key={card.id}
-                    onClick={() => {
-                      setSelectedContractId(card.id);
-                      setShowContractManager(true);
-                    }}
-                    className={cn(
-                      "group shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-300 relative border overflow-hidden",
-                      colorClasses,
-                      isActive ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02] grayscale-0 opacity-100" : "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]",
-                      isPending && !isActive && "grayscale opacity-70 hover:grayscale-0 hover:opacity-100",
-                      isDone && !isActive && "opacity-90 grayscale-[30%] hover:grayscale-0"
-                    )}
-                  >
-                    {/* Subtle glow for active card */}
-                    {isActive && (
-                      <>
-                        <div className={cn("absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-blue-100' : card.mode === 'Maintenance offerte' ? 'bg-red-100' : 'bg-green-100')}></div>
-                        <div className={cn("absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-indigo-100' : card.mode === 'Maintenance offerte' ? 'bg-orange-100' : 'bg-emerald-100')}></div>
-                      </>
-                    )}
+              const renderCard = (card: any, isStacked: boolean = false, stackIdx: number = 0, totalStacked: number = 0) => {
+                const isActive = selectedContractId ? card.id === selectedContractId : currentContract?.id === card.id;
+                const isPending = card.status === 'PENDING';
+                const isDone = card.status === 'DONE' || card.status === 'ABANDONED';
+                
+                const activePhaseIndex = card.phases ? card.phases.findIndex((p: any) => p.status !== 'DONE') : -1;
+                const actualPhaseIndex = activePhaseIndex === -1 && card.phases && card.phases.length > 0 ? card.phases.length - 1 : Math.max(0, activePhaseIndex);
+                const activePhase = card.phases?.[actualPhaseIndex];
+                const currentPhaseCount = card.phases && card.phases.length > 0 ? actualPhaseIndex + 1 : 0;
+                const totalPhasesCount = card.phases?.length || 0;
 
-                    <div className="relative z-10 flex flex-col h-full pt-1">
-                      <div className="flex items-start justify-between">
-                        <h4 className={cn(
-                          "font-extrabold text-[22px] tracking-tight leading-none mb-1.5 transition-colors",
-                          isActive ? (card.mode === 'Acquisition' ? "text-blue-900" : card.mode === 'Maintenance offerte' ? "text-red-900" : "text-green-900") : cn("text-slate-800", card.mode === 'Acquisition' ? "group-hover:text-blue-900" : card.mode === 'Maintenance offerte' ? "group-hover:text-red-900" : "group-hover:text-green-900")
-                        )}>
-                          {card.name}
-                        </h4>
-                        {isDone && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 ml-2" />}
-                      </div>
-                      {activePhase && (
-                         <span className={cn(
-                           "text-xs font-bold block mb-4 transition-colors",
-                           isActive ? "text-slate-600" : "text-slate-400 group-hover:text-slate-600"
-                         )}>
-                           <span className={isActive ? "text-slate-900" : "text-slate-500 group-hover:text-slate-900"}>{activePhase.name}</span>
-                         </span>
+                let colorClasses = "";
+                if (card.mode === 'Acquisition') {
+                  colorClasses = isActive ? "bg-blue-50 backdrop-blur-xl border-blue-200/60 shadow-blue-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-blue-50 hover:border-blue-200/60";
+                } else if (card.mode === 'Maintenance offerte') {
+                  colorClasses = isActive ? "bg-red-50 backdrop-blur-xl border-red-200/60 shadow-red-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-red-50 hover:border-red-200/60";
+                } else {
+                  colorClasses = isActive ? "bg-emerald-50 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-emerald-50 hover:border-emerald-200/60";
+                }
+
+                const stackedStyles = isStacked ? {
+                  position: 'absolute' as const,
+                  left: `${stackIdx * 25}px`,
+                  top: 0,
+                  zIndex: stackIdx,
+                  opacity: 1,
+                  transform: 'scale(0.95)',
+                  transformOrigin: 'left center',
+                  width: '280px',
+                  height: '190px'
+                } : {};
+
+                return (
+                    <button
+                      key={card.id}
+                      onClick={() => {
+                        setSelectedContractId(card.id);
+                        setShowContractManager(true);
+                      }}
+                      style={stackedStyles}
+                      className={cn(
+                        "group shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-300 border overflow-hidden",
+                        colorClasses,
+                        isStacked ? "shadow-lg grayscale-[40%] hover:-translate-y-3 hover:scale-100 hover:grayscale-0 hover:opacity-100 hover:z-50" : "relative",
+                        (!isStacked && isActive) ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02] grayscale-0 opacity-100" : (!isStacked) ? "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]" : "",
+                        (!isStacked && isPending && !isActive) ? "grayscale opacity-70 hover:grayscale-0 hover:opacity-100" : "",
+                        (!isStacked && isDone && !isActive) ? "opacity-90 grayscale-[30%] hover:grayscale-0" : ""
                       )}
-                      <div className="flex justify-between items-end mt-auto">
-                        <div className="flex flex-col gap-2.5">
-                           <span className={cn(
-                             "text-[10px] font-bold uppercase tracking-wider transition-colors",
-                             isActive ? "text-slate-500" : "text-slate-400 group-hover:text-slate-500"
-                           )}>
-                             {card.startDate ? `Début: ${card.startDate}` : (isPending ? 'En attente' : 'Non défini')}
-                           </span>
-                           {activePhase && activePhase.tasks && activePhase.tasks.length > 0 && (
-                             <div className="flex items-center gap-1.5 flex-wrap max-w-[120px]">
-                               {activePhase.tasks.map(t => (
-                                 <div 
-                                   key={t.id} 
-                                   className={cn(
-                                     "w-2 h-2 rounded-full shadow-sm border border-black/5",
-                                     t.status === 'DONE' ? 'bg-emerald-400' :
-                                     t.status === 'IN_PROGRESS' ? 'bg-blue-400' :
-                                     'bg-slate-300'
-                                   )}
-                                   title={t.name}
-                                 />
-                               ))}
-                             </div>
-                           )}
+                    >
+                      {/* Subtle glow for active card */}
+                      {isActive && !isStacked && (
+                        <>
+                          <div className={cn("absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-blue-100' : card.mode === 'Maintenance offerte' ? 'bg-red-100' : 'bg-green-100')}></div>
+                          <div className={cn("absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-indigo-100' : card.mode === 'Maintenance offerte' ? 'bg-orange-100' : 'bg-emerald-100')}></div>
+                        </>
+                      )}
+
+                      <div className="relative z-10 flex flex-col h-full pt-1">
+                        <div className="flex items-start justify-between">
+                          <h4 className={cn(
+                            "font-extrabold text-[22px] tracking-tight leading-none mb-1.5 transition-colors",
+                            isActive && !isStacked ? (card.mode === 'Acquisition' ? "text-blue-900" : card.mode === 'Maintenance offerte' ? "text-red-900" : "text-green-900") : cn("text-slate-800", card.mode === 'Acquisition' ? "group-hover:text-blue-900" : card.mode === 'Maintenance offerte' ? "group-hover:text-red-900" : "group-hover:text-green-900")
+                          )}>
+                            {card.name}
+                          </h4>
+                          {isDone && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 ml-2" />}
                         </div>
-                        {card.phases && (
+                        {activePhase && (
                            <span className={cn(
-                             "text-xs font-black transition-colors",
-                             isActive ? "text-slate-500" : "text-slate-400 group-hover:text-slate-500"
+                             "text-xs font-bold block mb-4 transition-colors",
+                             isActive && !isStacked ? "text-slate-600" : "text-slate-400 group-hover:text-slate-600"
                            )}>
-                             {currentPhaseCount}/{totalPhasesCount} Phases
+                             <span className={isActive && !isStacked ? "text-slate-900" : "text-slate-500 group-hover:text-slate-900"}>{activePhase.name}</span>
                            </span>
                         )}
+                        <div className="flex justify-between items-end mt-auto">
+                          <div className="flex flex-col gap-2.5">
+                             <span className={cn(
+                               "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                               isActive && !isStacked ? "text-slate-500" : "text-slate-400 group-hover:text-slate-500"
+                             )}>
+                               {card.startDate ? `Début: ${card.startDate}` : (isPending ? 'En attente' : 'Non défini')}
+                             </span>
+                             {activePhase && activePhase.tasks && activePhase.tasks.length > 0 && (
+                               <div className="flex items-center gap-1.5 flex-wrap max-w-[120px]">
+                                 {activePhase.tasks.map((t: any) => (
+                                   <div 
+                                     key={t.id} 
+                                     className={cn(
+                                       "w-2 h-2 rounded-full shadow-sm border border-black/5",
+                                       t.status === 'DONE' ? 'bg-emerald-400' :
+                                       t.status === 'IN_PROGRESS' ? 'bg-blue-400' :
+                                       'bg-slate-300'
+                                     )}
+                                     title={t.name}
+                                   />
+                                 ))}
+                               </div>
+                             )}
+                          </div>
+                          <div className={cn(
+                            "text-sm font-extrabold transition-colors",
+                            isActive && !isStacked ? "text-slate-800" : "text-slate-500 group-hover:text-slate-800"
+                          )}>
+                            {currentPhaseCount}/{totalPhasesCount} <span className="text-[10px] uppercase font-bold opacity-70">Phases</span>
+                          </div>
+                        </div>
                       </div>
+                    </button>
+                );
+              };
+
+              return (
+                <>
+                  {pastContracts.length > 0 && (
+                    <div className="relative shrink-0" style={{ width: `${280 + (pastContracts.length - 1) * 25}px`, height: '190px' }}>
+                      {pastContracts.map((card, index) => renderCard(card, true, index, pastContracts.length))}
                     </div>
-                  </button>
+                  )}
+                  {activeContracts.map(card => renderCard(card))}
+                </>
               );
-            })}
+            })()}
           </div>
           </div>
         </div>
@@ -509,9 +584,35 @@ export default function ProjectDetails() {
               <p className="text-slate-500 font-bold">Aucun encaissement programmé.</p>
               <p className="text-slate-400 text-sm mt-1">Validez la tâche "Formation" dans l'Acquisition pour générer l'échéancier initial.</p>
             </div>
-          ) : (
-            <div className="space-y-4">
-              {[...project.encaissements].sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime()).map(enc => {
+          ) : (() => {
+            const isDossierManager = (enc: any) => {
+               if (!enc.isCombined) return true;
+               const dossierId = enc.combinedWithDossierId || enc.dossierId;
+               const dossier = dossiersPaiement.find(d => d.id === dossierId);
+               if (!dossier) return true;
+               return dossier.encaissementIds[dossier.encaissementIds.length - 1] === enc.id;
+            };
+
+            const sortedEncaissements = [...project.encaissements].sort((a, b) => {
+               const timeA = a.targetDate ? new Date(a.targetDate).getTime() : 0;
+               const timeB = b.targetDate ? new Date(b.targetDate).getTime() : 0;
+               const diff = timeA - timeB;
+               if (diff !== 0) return diff;
+               
+               if (a.mode === 'Acquisition' && b.mode === 'Maintenance') return -1;
+               if (a.mode === 'Maintenance' && b.mode === 'Acquisition') return 1;
+               return 0;
+            });
+            
+            const pastEncaissements = sortedEncaissements.filter((enc) => {
+               if (enc.status === 'DONE' || enc.status === 'ABANDONED') return true;
+               if (enc.isCombined && !isDossierManager(enc)) return true;
+               return false;
+            });
+            const pastIds = new Set(pastEncaissements.map(e => e.id));
+            const activeEncaissements = sortedEncaissements.filter(enc => !pastIds.has(enc.id));
+
+            const renderEncaissementCard = (enc: any, isStacked: boolean = false, stackIdx: number = 0, totalStacked: number = 0) => {
                 const isUpcoming = enc.status === 'UPCOMING';
                 const isDone = enc.status === 'DONE';
                 const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
@@ -540,17 +641,32 @@ export default function ProjectDetails() {
                 };
                 
                 const activeStep = getActiveStep();
+                
+                const stackedStyles = isStacked ? {
+                  position: 'absolute' as const,
+                  top: `${40 + stackIdx * 8}px`,
+                  left: `${stackIdx * 15}px`,
+                  right: 0,
+                  zIndex: stackIdx,
+                  opacity: 0.6 + (stackIdx * (0.4 / Math.max(totalStacked, 1))),
+                  transform: 'scale(0.98)',
+                  transformOrigin: 'top left'
+                } : {};
 
                 return (
-                  <div key={enc.id} className={cn(
-                    "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
-                    isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
-                    isDone ? "bg-emerald-50 border-emerald-200/60" :
+                  <div key={enc.id} 
+                    style={stackedStyles}
+                    className={cn(
+                    "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300",
+                    isStacked ? "hover:-translate-y-2 hover:opacity-100 hover:z-50 cursor-pointer shadow-lg bg-slate-100 border-slate-300" :
+                    isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80 shadow-sm" :
+                    isDone ? "bg-emerald-50 border-emerald-200/60 shadow-sm" :
                     "bg-white border-blue-200/60 shadow-md shadow-blue-500/5"
                   )}>
                     <div className="flex items-center gap-4">
                       <div className={cn(
                         "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
+                        isStacked ? "bg-slate-200 text-slate-500" :
                         isUpcoming ? "bg-slate-200 text-slate-500" :
                         isDone ? "bg-emerald-100 text-emerald-600" :
                         "bg-blue-100 text-blue-600"
@@ -560,6 +676,7 @@ export default function ProjectDetails() {
                       <div>
                         <h4 className={cn(
                           "font-extrabold text-base mb-1",
+                          isStacked ? "text-slate-600" :
                           isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
                         )}>
                           {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}
@@ -569,7 +686,7 @@ export default function ProjectDetails() {
                           <span>•</span>
                           <span className={cn(
                             "whitespace-nowrap",
-                            isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
+                            (!isStacked && isDone) ? "text-emerald-600" : (!isStacked && isProgress) ? "text-blue-600" : ""
                           )}>
                             Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
                           </span>
@@ -602,7 +719,7 @@ export default function ProjectDetails() {
                         </div>
                       )}
 
-                      {isProgress && (
+                      {isProgress && !isStacked && (
                         <button 
                           onClick={() => setShowFacturation(true)}
                           className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
@@ -615,7 +732,7 @@ export default function ProjectDetails() {
                           <CheckCircle2 className="w-4 h-4" /> Clôturé
                         </span>
                       )}
-                      {isUpcoming && (
+                      {isUpcoming && !isStacked && (
                         <div className="flex items-center gap-2">
                           <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
                             <Clock className="w-4 h-4" /> En attente
@@ -631,9 +748,24 @@ export default function ProjectDetails() {
                     </div>
                   </div>
                 );
-              })}
-            </div>
-          )}
+            };
+
+            return (
+              <div className="space-y-4 w-full">
+                {pastEncaissements.length > 0 && (
+                  <div className="relative mb-2 shrink-0" style={{ height: `${100 + pastEncaissements.length * 8}px` }}>
+                    {pastEncaissements.map((enc, idx) => renderEncaissementCard(enc, true, idx, pastEncaissements.length))}
+                  </div>
+                )}
+                
+                {activeEncaissements.length > 0 && (
+                  <div className="space-y-4">
+                    {activeEncaissements.map(enc => renderEncaissementCard(enc))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
         </div>
 
@@ -1333,7 +1465,25 @@ export default function ProjectDetails() {
                   <p className="text-slate-500 text-sm font-bold">Aucun encaissement en cours ou en attente d'action.</p>
                 </div>
               ) : (
-                project.encaissements.filter(e => e.status === 'IN_PROGRESS' || e.status === 'PARTIAL').map(enc => (
+                project.encaissements.filter(e => e.status === 'IN_PROGRESS' || e.status === 'PARTIAL').map(enc => {
+                  let isDossierManager = false;
+                  let otherNames: string[] = [];
+                  if (enc.isCombined) {
+                     const dossierId = enc.combinedWithDossierId || (enc as any).dossierId;
+                     const dossier = dossiersPaiement.find(d => d.id === dossierId);
+                     if (dossier) {
+                       isDossierManager = dossier.encaissementIds[dossier.encaissementIds.length - 1] === enc.id;
+                       projects.forEach(p => {
+                         p.encaissements?.forEach(e => {
+                           if (e.id !== enc.id && dossier.encaissementIds.includes(e.id)) {
+                             otherNames.push(`${e.mode} ${e.year ? `(Année ${e.year})` : ''} - Projet: ${p.name}`);
+                           }
+                         });
+                       });
+                     }
+                  }
+
+                  return (
                    <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
                       <div className="flex justify-between items-center mb-6">
                         <div>
@@ -1360,8 +1510,29 @@ export default function ProjectDetails() {
                         )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
                       </div>
                       
-                      <div className="flex flex-col gap-3 mb-6">
-                        {/* 1. PROFORMA */}
+                      {enc.isCombined && (
+                        <div className={cn(
+                          "flex flex-col items-center justify-center border rounded-2xl p-6 mb-6 text-center",
+                          isDossierManager ? "bg-purple-50 border-purple-200" : "bg-slate-50 border-slate-200 p-8"
+                        )}>
+                          <FolderKanban className={cn("w-10 h-10 mb-3", isDossierManager ? "text-purple-400" : "text-slate-300")} />
+                          <h5 className={cn("text-sm font-extrabold mb-2", isDossierManager ? "text-purple-900" : "text-slate-800")}>
+                            {isDossierManager ? "Gestionnaire du Dossier Fusionné" : "Encaissement Fusionné (Désactivé)"}
+                          </h5>
+                          <p className={cn("text-xs font-bold max-w-sm", isDossierManager ? "text-purple-700" : "text-slate-500")}>
+                            {isDossierManager 
+                              ? "Cet encaissement pilote la facturation globale du dossier qui inclut également :" 
+                              : "Cette facturation est désormais incluse dans un dossier géré par un autre encaissement :"}<br/>
+                            <span className={cn("font-black block mt-2", isDossierManager ? "text-purple-900" : "text-purple-600")}>
+                              {otherNames.length > 0 ? otherNames.join(' + ') : 'Dossier fusionné'}
+                            </span>
+                          </p>
+                        </div>
+                      )}
+                      
+                      {(!enc.isCombined || isDossierManager) && (
+                        <div className="flex flex-col gap-3 mb-6">
+                          {/* 1. PROFORMA */}
                         <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
                           <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
                             <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">1</span>
@@ -1507,15 +1678,17 @@ export default function ProjectDetails() {
                           </div>
                         </div>
                       </div>
+                      )}
                       
-                      {enc.resteDette ? (
+                      {!enc.isCombined && enc.resteDette ? (
                         <div className="bg-red-50 text-red-700 text-xs font-bold p-3 rounded-xl border border-red-100 flex items-center justify-between">
                           <span>Dette générée reportée à l'année suivante :</span>
                           <span>{enc.resteDette.toLocaleString()} DA</span>
                         </div>
                       ) : null}
-                   </div>
-                ))
+                  </div>
+                );
+              })
               )}
             </div>
             

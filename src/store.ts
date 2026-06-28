@@ -783,6 +783,9 @@ export const useStore = create<AppState>()(
         if (!project || !project.encaissements) return;
 
         // 1. Update the Maintenance Encaissement
+        const targetEnc = project.encaissements.find(e => e.id === encaissementId);
+        const currentYear = targetEnc?.year || 1;
+
         const updatedEncaissements = project.encaissements.map(e => {
           if (e.id === encaissementId) {
             return {
@@ -791,21 +794,79 @@ export const useStore = create<AppState>()(
               status: 'IN_PROGRESS' as const
             };
           }
+          if (e.mode === 'Maintenance' && e.year === currentYear - 1 && e.status === 'IN_PROGRESS') {
+            return {
+              ...e,
+              status: 'DONE' as const
+            };
+          }
           return e;
         });
 
-        // 2. Mark "Maintenance offerte" as ABANDONED/DONE
-        let updatedContracts = project.contracts;
-        if (project.contracts) {
-          updatedContracts = project.contracts.map(c => {
-            if (c.mode === 'Maintenance offerte' && c.status !== 'CLOSED' && c.status !== 'DONE') {
-              return { ...c, status: 'DONE' }; // We mark it as DONE but it effectively skips it
-            }
-            if (c.mode === 'Maintenance') {
-              return { ...c, startDate: new Date().toISOString().split('T')[0] };
-            }
-            return c;
-          });
+        const nextTargetDate = new Date();
+        nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
+        updatedEncaissements.push({
+          id: uuidv4(),
+          projectId,
+          mode: 'Maintenance',
+          year: currentYear + 1,
+          targetDate: nextTargetDate.toISOString().split('T')[0],
+          status: 'UPCOMING',
+          proforma: { status: 'PENDING' },
+          bc: { status: 'PENDING' },
+          facture: { status: 'PENDING' }
+        });
+
+        // 2. Mark "Maintenance offerte" as ABANDONED/DONE and manage Maintenance contracts
+        let updatedContracts = project.contracts || [];
+        
+        updatedContracts = updatedContracts.map(c => {
+          if (c.mode === 'Maintenance offerte' && c.status !== 'CLOSED' && c.status !== 'DONE') {
+            return { ...c, status: 'DONE' as const };
+          }
+          if (c.mode === 'Maintenance' && c.status !== 'DONE' && c.status !== 'CLOSED') {
+            // Clôturer l'année précédente
+            return { ...c, status: 'DONE' as const };
+          }
+          return c;
+        });
+
+        // Generate the new contract for the next year
+        updatedContracts.push({
+          id: uuidv4(),
+          name: `Maintenance Année ${currentYear + 1}`,
+          type: 'Standard',
+          mode: 'Maintenance',
+          status: 'PENDING' as const,
+          phases: [
+            { id: uuidv4(), name: 'Encaissement', status: 'PENDING' as const, tasks: [] },
+            { id: uuidv4(), name: 'Recouvrement', status: 'PENDING' as const, tasks: [] }
+          ]
+        });
+
+        // Activate the current year contract
+        const currentYearContract = updatedContracts.find(c => c.mode === 'Maintenance' && (c.name === `Maintenance Année ${currentYear}` || (currentYear === 1 && (c.name === 'Maintenance Annuelle' || c.name === 'Maintenance'))));
+        if (!currentYearContract) {
+           // If it didn't exist yet, we create it active
+           updatedContracts.push({
+             id: uuidv4(),
+             name: `Maintenance Année ${currentYear}`,
+             type: 'Standard',
+             mode: 'Maintenance',
+             status: 'ACTIVE' as const,
+             startDate: new Date().toISOString().split('T')[0],
+             phases: [
+               { id: uuidv4(), name: 'Encaissement', status: 'ACTIVE' as const, tasks: [] },
+               { id: uuidv4(), name: 'Recouvrement', status: 'PENDING' as const, tasks: [] }
+             ]
+           });
+        } else {
+           currentYearContract.name = `Maintenance Année ${currentYear}`;
+           currentYearContract.status = 'ACTIVE';
+           currentYearContract.startDate = new Date().toISOString().split('T')[0];
+           if (currentYearContract.phases && currentYearContract.phases.length > 0) {
+             currentYearContract.phases[0].status = 'ACTIVE';
+           }
         }
 
         const newHistory = [
@@ -813,14 +874,14 @@ export const useStore = create<AppState>()(
           {
             id: uuidv4(),
             date: new Date().toLocaleDateString('fr-FR'),
-            message: `Maintenance activée par anticipation. Maintenance Gratuite sautée.`
+            message: `Maintenance Année ${currentYear} activée par anticipation. Maintenance Gratuite sautée.`
           }
         ];
 
         state.updateProject(projectId, { 
           encaissements: updatedEncaissements, 
           contracts: updatedContracts,
-          history: newHistory
+          history: newHistory 
         });
 
         // 3. Handle Merge if requested

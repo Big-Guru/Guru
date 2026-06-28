@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { X, Banknote } from 'lucide-react';
+import { X, Banknote, FolderKanban } from 'lucide-react';
 import { useStore } from '../store';
 import { Client, EncaissementRecord } from '../types';
 import { cn } from '../lib/utils';
 import DocumentPreviewModal from './DocumentPreviewModal';
+import { getPrice } from '../lib/pricing';
 
 interface EnrichedEncaissement extends EncaissementRecord {
   projectId: string;
@@ -58,29 +59,77 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
               <Banknote className="w-12 h-12 text-slate-300 mx-auto mb-4" />
               <p className="text-slate-500 text-sm font-bold">Aucun encaissement dans ce dossier.</p>
             </div>
-          ) : (() => {
-            const enc = encaissements[0];
-            const combinedNames = Array.from(new Set(encaissements.map(e => e.projectName))).join(" & ");
-            const combinedProducts = Array.from(new Set(encaissements.map(e => e.product))).join(" & ");
-            
-            return (
-               <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
-                  <div className="flex justify-between items-start mb-6 gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <h4 className="font-black text-slate-900 text-lg break-words">{combinedNames} - {combinedProducts}</h4>
-                      </div>
-                      <span className="text-slate-500 text-xs font-bold mt-2 block">Mode : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} • Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+          ) : (
+            <>
+              {/* Anciens Encaissements du Dossier */}
+              {encaissements.length > 1 && (
+                <div className="bg-slate-50 border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden mb-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
+                      <FolderKanban className="w-5 h-5 text-slate-400" />
                     </div>
-                    <span className={cn(
-                      "whitespace-nowrap shrink-0 mt-1 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
-                      enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 
-                      enc.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
-                    )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : enc.status === 'DONE' ? 'Terminé' : 'En Cours'}</span>
+                    <div>
+                      <h4 className="font-black text-slate-800 text-lg">Ancien dossier d'encaissement</h4>
+                      <p className="text-xs font-bold text-slate-500">Facturation clôturée et fusionnée</p>
+                    </div>
                   </div>
                   
-                  <div className="flex flex-col gap-3 mb-6">
-                    {/* 1. PROFORMA */}
+                  <div className="space-y-3 mb-6">
+                    {encaissements.slice(0, -1).map((enc, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center">
+                        <div>
+                          <p className="text-sm font-extrabold text-slate-800">{enc.projectName} - {enc.product}</p>
+                          <p className="text-xs font-bold text-slate-500 mt-1">Encaissement : <span className="text-purple-600">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span></p>
+                        </div>
+                        <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-lg text-[10px] font-black uppercase tracking-wider">Désactivé</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-slate-200/50 rounded-xl p-4 text-center border border-slate-200">
+                    <p className="text-xs font-bold text-slate-600">
+                      Les éléments de facturation qui constituaient ce dossier sont désormais fermés.<br/>
+                      Ils ont été fusionnés et sont gérés par le nouvel encaissement ci-dessous.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Le Gestionnaire du Dossier */}
+              {(() => {
+                const enc = encaissements[encaissements.length - 1];
+                const otherNames = encaissements.slice(0, -1).map(e => `${e.mode} ${e.year ? `(Année ${e.year})` : ''} - Projet: ${e.projectName}`);
+                
+                return (
+                   <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
+                      <div className="flex justify-between items-start mb-6 gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <h4 className="font-black text-slate-900 text-lg break-words">{enc.projectName} - {enc.product}</h4>
+                          </div>
+                          <span className="text-slate-500 text-xs font-bold mt-2 block">Encaissement : <span className="text-purple-600">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span></span>
+                          <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+                        </div>
+                        <span className={cn(
+                          "whitespace-nowrap shrink-0 mt-1 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
+                          enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 
+                          enc.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                        )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : enc.status === 'DONE' ? 'Terminé' : 'En Cours'}</span>
+                      </div>
+                      
+                      <div className="bg-purple-50 border border-purple-200 flex flex-col items-center justify-center rounded-2xl p-6 mb-6 text-center">
+                        <FolderKanban className="w-10 h-10 mb-3 text-purple-400" />
+                        <h5 className="text-sm font-extrabold mb-2 text-purple-900">Gestionnaire du Dossier Fusionné</h5>
+                        <p className="text-xs font-bold max-w-sm text-purple-700">
+                          Cet encaissement pilote la facturation globale du dossier qui inclut également :<br/>
+                          <span className="font-black block mt-2 text-purple-900">
+                            {otherNames.length > 0 ? otherNames.join(' + ') : 'Dossier fusionné'}
+                          </span>
+                        </p>
+                      </div>
+                      
+                      <div className="flex flex-col gap-3 mb-6">
+                        {/* 1. PROFORMA */}
                     <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
                       <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
                         <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">1</span>
@@ -223,16 +272,18 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                       </div>
                     </div>
                   </div>
-                  
+                    
                   {enc.resteDette ? (
                     <div className="bg-red-50 text-red-700 text-xs font-bold p-3 rounded-xl border border-red-100 flex items-center justify-between">
                       <span>Dette générée reportée à l'année suivante :</span>
                       <span>{enc.resteDette.toLocaleString()} DA</span>
                     </div>
                   ) : null}
-               </div>
-            );
-          })()}
+                   </div>
+                );
+              })()}
+            </>
+          )}
         </div>
         
         <div className="flex justify-end pt-6 mt-4 border-t border-slate-100 gap-3">
@@ -248,15 +299,41 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
          if (!targetEnc) return null;
          
          const docStatus = previewModalConfig.type === 'PROFORMA' ? targetEnc.proforma.status : targetEnc.facture.status;
-         const draft = previewModalConfig.draftSnapshot || (previewModalConfig.type === 'PROFORMA' ? targetEnc.proforma.draft : targetEnc.facture.draft) || {
-            documentNumber: `${previewModalConfig.type === 'PROFORMA' ? 'PF' : 'FA'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`,
-            createdAt: new Date().toISOString(),
-            items: [],
-            totalHT: 0,
-            tva: 0,
-            totalTTC: 0,
-            montantToutesTaxesComprises: ''
-         };
+         let draft = previewModalConfig.draftSnapshot || (previewModalConfig.type === 'PROFORMA' ? targetEnc.proforma.draft : targetEnc.facture.draft);
+
+         if (!draft || !draft.items || draft.items.length === 0) {
+            let totalHT = 0;
+            const items = encaissements.map(e => {
+               const p = projects.find(pr => pr.id === e.projectId);
+               const prod = p?.product || e.product; // Fallback to e.product if not found
+               const vers = p?.version;
+               const price = getPrice(prod, vers, e.mode);
+               totalHT += price;
+               
+               const versionStr = vers ? `, Version ${vers}` : '';
+               const title = `Logiciel ${prod}${versionStr}`;
+               const subtitle = e.mode === 'Acquisition' ? 'Acquisition' : `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
+               const description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle (Heures de bureau, Du Dimanche au Jeudi)\n• Télé-intervention annuelle (Heures de bureau, Du Dimanche au Jeudi)`.trim();
+               
+               return {
+                 description,
+                 price
+               };
+            });
+
+            const totalTVA = totalHT * 0.19;
+            const totalTTC = totalHT + totalTVA;
+
+            draft = {
+              documentNumber: `${previewModalConfig.type === 'PROFORMA' ? 'PF' : 'FA'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`,
+              items,
+              totalHT,
+              totalTVA,
+              totalTTC,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+         }
          
          return (
             <DocumentPreviewModal
@@ -266,7 +343,7 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                project={targetProject}
                encaissement={targetEnc}
                draft={draft}
-               status={previewModalConfig.readOnlyStatus || docStatus}
+               status={previewModalConfig.readOnlyStatus || (docStatus === 'PENDING' ? 'GENERATED' : docStatus)}
                isReadOnly={previewModalConfig.isReadOnly}
                onClose={() => setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' })}
                onSaveDraft={(updatedDraft) => {

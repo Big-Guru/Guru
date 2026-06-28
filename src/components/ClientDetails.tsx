@@ -505,8 +505,10 @@ export default function ClientDetails() {
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {dossiersPaiement.filter(d => d.clientId === id).map((dossier) => {
-                // Get all encaissements for this dossier
-                const dossierEncaissements = allEncaissements.filter(e => dossier.encaissementIds.includes(e.id));
+                // Get all encaissements for this dossier IN THE ORDER THEY WERE ADDED
+                const dossierEncaissements = dossier.encaissementIds
+                  .map(id => allEncaissements.find(e => e.id === id))
+                  .filter(Boolean) as EnrichedEncaissement[];
                 
                 return (
                   <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
@@ -820,10 +822,13 @@ export default function ClientDetails() {
         <FacturationDossierModal 
           dossierId={selectedDossierFacturationId}
           client={client}
-          encaissements={allEncaissements.filter(e => {
+          encaissements={(() => {
             const dossier = dossiersPaiement.find(d => d.id === selectedDossierFacturationId);
-            return dossier?.encaissementIds.includes(e.id);
-          })}
+            if (!dossier) return [];
+            return dossier.encaissementIds
+              .map(id => allEncaissements.find(e => e.id === id))
+              .filter(Boolean) as any[];
+          })()}
           onClose={() => setSelectedDossierFacturationId(null)}
         />
       )}

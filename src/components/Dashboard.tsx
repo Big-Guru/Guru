@@ -15,11 +15,17 @@ export default function Dashboard() {
     if (!window.confirm("Voulez-vous vraiment supprimer TOUS les projets de la base de données Firebase ?")) return;
     setIsWiping(true);
     try {
-      const snapshot = await getDocs(collection(db, 'projects'));
-      for (const document of snapshot.docs) {
+      const projectsSnapshot = await getDocs(collection(db, 'projects'));
+      for (const document of projectsSnapshot.docs) {
         await deleteDoc(doc(db, 'projects', document.id));
       }
-      alert("Succès ! La base de données des projets est vierge.");
+      
+      const dossiersSnapshot = await getDocs(collection(db, 'dossiers'));
+      for (const document of dossiersSnapshot.docs) {
+        await deleteDoc(doc(db, 'dossiers', document.id));
+      }
+      
+      alert("Succès ! La base de données des projets et des dossiers d'encaissement est vierge.");
     } catch (err) {
       console.error(err);
       alert("Erreur lors de la purge : " + String(err));
