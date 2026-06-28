@@ -13,6 +13,7 @@ import ClientForm from './components/ClientForm';
 import ProjectList from './components/ProjectList';
 import AlertsList from './components/AlertsList';
 import MissionsList from './components/MissionsList';
+import EncaissementsList from './components/EncaissementsList';
 
 import AuthWrapper from './components/AuthWrapper';
 import FirebaseSync from './components/FirebaseSync';
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="projects" element={<ProjectList />} />
             <Route path="projects/:id" element={<ProjectDetails />} />
             <Route path="alerts" element={<AlertsList />} />
+            <Route path="encaissements" element={<EncaissementsList />} />
             <Route path="missions" element={<MissionsList />} />
             <Route path="*" element={<div className="p-8">Oups ! Page introuvable.</div>} />
           </Route>

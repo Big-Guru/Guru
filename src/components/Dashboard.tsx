@@ -1,13 +1,14 @@
 import { useStore } from '../store';
 import { calculateAlerts } from '../lib/alerts';
 import { Link } from 'react-router-dom';
-import { Briefcase, Users, AlertTriangle, AlertCircle, Calendar, MapPin, ArrowRight, Trash2 } from 'lucide-react';
+import { Briefcase, Users, AlertTriangle, AlertCircle, Calendar, MapPin, ArrowRight, Trash2, Banknote } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { useState } from 'react';
+import { differenceInDays } from 'date-fns';
 
 export default function Dashboard() {
-  const { clients, projects, missions } = useStore();
+  const { clients, projects, missions, dossiersPaiement } = useStore();
   const [isWiping, setIsWiping] = useState(false);
 
   const handleWipeProjects = async () => {
@@ -53,6 +54,34 @@ export default function Dashboard() {
     .filter(m => m.status === 'PLANNED' || m.status === 'IN_PROGRESS')
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 3);
+
+  // Get active encaissements total (counting dossiers as 1)
+  const allEncsWithDetails = projects.flatMap(p => 
+    (p.encaissements || []).map(e => ({
+      ...e,
+      project: p,
+      client: clients.find(c => c.id === p.clientId)
+    }))
+  ).filter(e => {
+    if (e.status === 'DONE' || !e.client) return false;
+    const daysUntilDue = differenceInDays(new Date(e.targetDate), new Date());
+    return daysUntilDue <= 30;
+  });
+
+  const activeDossiers = dossiersPaiement.map(d => {
+    const encs = allEncsWithDetails.filter(e => d.encaissementIds.includes(e.id));
+    return encs.length > 0 ? { ...encs[0], mode: 'Dossier Fusionné' } : null;
+  }).filter(Boolean) as typeof allEncsWithDetails;
+
+  const singleEncaissements = allEncsWithDetails.filter(e => !e.isCombined);
+
+  const allCombinedEncaissements = [...activeDossiers, ...singleEncaissements];
+  const totalActiveEncaissements = allCombinedEncaissements.length;
+
+  // Get upcoming encaissements (max 3)
+  const upcomingEncaissements = allCombinedEncaissements
+   .sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime())
+   .slice(0, 3);
 
   return (
     <div className="space-y-6">
@@ -137,24 +166,24 @@ export default function Dashboard() {
           </div>
         </Link>
         
-        {/* Warnings */}
-        <Link to="/alerts" className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-amber-200 transition-all duration-300 group relative overflow-hidden flex flex-col justify-between">
-          <div className="absolute -right-6 -top-6 w-24 h-24 bg-amber-50 rounded-full blur-2xl group-hover:bg-amber-100/60 transition-colors"></div>
+        {/* Encaissements */}
+        <Link to="/encaissements" className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-emerald-200 transition-all duration-300 group relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute -right-6 -top-6 w-24 h-24 bg-emerald-50 rounded-full blur-2xl group-hover:bg-emerald-100/60 transition-colors"></div>
           <div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4 border border-amber-100 group-hover:scale-110 transition-transform">
-              <AlertCircle className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 border border-emerald-100 group-hover:scale-110 transition-transform">
+              <Banknote className="w-5 h-5" />
             </div>
-            <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1">Avertissements</p>
-            <p className="text-3xl font-extrabold text-amber-600 tracking-tight">{totalWarning}</p>
+            <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Encaissements</p>
+            <p className="text-3xl font-extrabold text-emerald-600 tracking-tight">{totalActiveEncaissements}</p>
           </div>
-          <div className="text-xs font-semibold text-amber-600 mt-4 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-            Vérifier les dossiers <ArrowRight className="w-3.5 h-3.5" />
+          <div className="text-xs font-semibold text-emerald-600 mt-4 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+            Suivre les paiements <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </Link>
       </div>
 
-      {/* Main Grid: Alerts & Missions summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Main Grid: Alerts, Missions & Encaissements summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Critical Alerts Panel */}
         <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
@@ -238,6 +267,50 @@ export default function Dashboard() {
                   }`}>
                     {mission.status === 'IN_PROGRESS' ? 'En cours' : 'Prévu'}
                   </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Encaissements Panel */}
+        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+              <Banknote className="w-4 h-4 text-emerald-500" />
+              Échéances proches
+            </h3>
+            <Link to="/encaissements" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+              Voir tout
+            </Link>
+          </div>
+          <div className="p-6 flex-1 divide-y divide-slate-100">
+            {upcomingEncaissements.length === 0 ? (
+              <div className="h-48 flex flex-col items-center justify-center text-slate-400 text-sm">
+                <div className="h-10 w-10 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-2">
+                  <Banknote className="w-5 h-5" />
+                </div>
+                <span>Aucun encaissement en attente.</span>
+              </div>
+            ) : (
+              upcomingEncaissements.map(enc => (
+                <div key={enc.id} className="py-4 first:pt-0 last:pb-0 flex items-start justify-between gap-4 group">
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-950 leading-tight group-hover:text-emerald-600 transition-colors">
+                      {enc.client?.name}
+                    </p>
+                    <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {new Date(enc.targetDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded shrink-0 bg-blue-50 text-blue-700 border border-blue-100`}>
+                      {enc.mode}
+                    </span>
+                  </div>
                 </div>
               ))
             )}

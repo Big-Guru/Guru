@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { Home, Users, Briefcase, Bell, LogOut, Menu, X, Map, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Home, Users, Briefcase, Bell, LogOut, Menu, X, Map, ChevronLeft, ChevronRight, Banknote } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store';
 import { calculateAlerts } from '../lib/alerts';
@@ -33,6 +33,7 @@ export default function Layout() {
     { to: '/clients', icon: Users, label: 'Clients' },
     { to: '/projects', icon: Briefcase, label: 'Projets' },
     { to: '/alerts', icon: Bell, label: 'Alertes' },
+    { to: '/encaissements', icon: Banknote, label: 'Encaissements' },
     { to: '/missions', icon: Map, label: 'Missions' },
   ];
 
