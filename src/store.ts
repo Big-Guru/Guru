@@ -93,6 +93,7 @@ interface AppState {
   updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
   addDocumentHistoryEvent: (projectId: string, encaissementId: string, event: Omit<DocumentHistoryEvent, 'id'>) => void;
   generateMaintenanceEncaissement: (projectId: string) => void;
+  activateMaintenanceEncaissement: (projectId: string, encaissementId: string, mergeConfig?: { dossierId?: string; otherEncaissementId?: string; otherProjectId?: string; clientId?: string }) => Promise<void>;
 }
 
 export const useStore = create<AppState>()(
@@ -775,6 +776,80 @@ export const useStore = create<AppState>()(
         };
         
         state.updateProject(projectId, { encaissements: [...project.encaissements, newEncaissement] });
+      },
+      activateMaintenanceEncaissement: async (projectId, encaissementId, mergeConfig) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.encaissements) return;
+
+        // 1. Update the Maintenance Encaissement
+        const updatedEncaissements = project.encaissements.map(e => {
+          if (e.id === encaissementId) {
+            return {
+              ...e,
+              targetDate: new Date().toISOString().split('T')[0],
+              status: 'IN_PROGRESS' as const
+            };
+          }
+          return e;
+        });
+
+        // 2. Mark "Maintenance offerte" as ABANDONED/DONE
+        let updatedContracts = project.contracts;
+        if (project.contracts) {
+          updatedContracts = project.contracts.map(c => {
+            if (c.mode === 'Maintenance offerte' && c.status !== 'CLOSED' && c.status !== 'DONE') {
+              return { ...c, status: 'DONE' }; // We mark it as DONE but it effectively skips it
+            }
+            if (c.mode === 'Maintenance') {
+              return { ...c, startDate: new Date().toISOString().split('T')[0] };
+            }
+            return c;
+          });
+        }
+
+        const newHistory = [
+          ...(project.history || []),
+          {
+            id: uuidv4(),
+            date: new Date().toLocaleDateString('fr-FR'),
+            message: `Maintenance activée par anticipation. Maintenance Gratuite sautée.`
+          }
+        ];
+
+        state.updateProject(projectId, { 
+          encaissements: updatedEncaissements, 
+          contracts: updatedContracts,
+          history: newHistory
+        });
+
+        // 3. Handle Merge if requested
+        if (mergeConfig) {
+          // If we merge into an existing dossier
+          if (mergeConfig.dossierId) {
+            const dossier = state.dossiersPaiement.find(d => d.id === mergeConfig.dossierId);
+            if (dossier) {
+              const newEncaissementIds = [...dossier.encaissementIds, encaissementId];
+              await state.updateDossierPaiement(dossier.id, { encaissementIds: newEncaissementIds });
+              
+              // update this encaissement to know it's in a dossier
+              state.updateEncaissement(projectId, encaissementId, { isCombined: true, combinedWithDossierId: dossier.id });
+            }
+          } 
+          // If we create a new dossier from an existing independent encaissement
+          else if (mergeConfig.otherEncaissementId && mergeConfig.otherProjectId && mergeConfig.clientId) {
+            const newDossierId = await state.addDossierPaiement({
+              clientId: mergeConfig.clientId,
+              encaissementIds: [mergeConfig.otherEncaissementId, encaissementId],
+              status: 'IN_PROGRESS',
+              documents: {}
+            });
+            
+            // update both encaissements
+            state.updateEncaissement(projectId, encaissementId, { isCombined: true, combinedWithDossierId: newDossierId });
+            state.updateEncaissement(mergeConfig.otherProjectId, mergeConfig.otherEncaissementId, { isCombined: true, combinedWithDossierId: newDossierId });
+          }
+        }
       },
       addDossierPaiement: async (dossierData) => {
         const id = uuidv4();

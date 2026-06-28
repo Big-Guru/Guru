@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote } from 'lucide-react';
+import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power } from 'lucide-react';
 import { ProjectTask, Contract, ProjectContact, DocumentTrack, DocumentDraft } from '../types';
 import { generateWordDocument } from '../lib/docxGenerator';
 import { getPrice } from '../lib/pricing';
@@ -36,8 +36,10 @@ export default function ProjectDetails() {
     updateEncaissement,
     dissociateDossier,
     generateMaintenanceEncaissement,
+    activateMaintenanceEncaissement,
     addHistoryEvent,
-    addDocumentHistoryEvent
+    addDocumentHistoryEvent,
+    dossiersPaiement
   } = useStore();
 
   const project = projects.find(p => p.id === id);
@@ -50,6 +52,8 @@ export default function ProjectDetails() {
   const [showEditProject, setShowEditProject] = useState(false);
   const [showContractManager, setShowContractManager] = useState(false);
   const [showFacturation, setShowFacturation] = useState(false);
+  const [showActivationModal, setShowActivationModal] = useState<{ isOpen: boolean, encaissementId: string | null }>({ isOpen: false, encaissementId: null });
+  const [selectedMergeCandidate, setSelectedMergeCandidate] = useState<string>('none');
   const [previewModalConfig, setPreviewModalConfig] = useState<{
     isOpen: boolean;
     type: 'PROFORMA' | 'FACTURE';
@@ -59,6 +63,30 @@ export default function ProjectDetails() {
     readOnlyStatus?: string;
   }>({ isOpen: false, type: 'PROFORMA' });
   
+  const mergeCandidates = useMemo(() => {
+    if (!showActivationModal.isOpen || !project?.clientId) return [];
+    
+    const candidates: Array<{ type: 'DOSSIER' | 'SINGLE', id: string, name: string, projectId?: string }> = [];
+    
+    const activeDossiers = dossiersPaiement.filter(d => d.clientId === project.clientId && d.status !== 'DONE');
+    activeDossiers.forEach(d => {
+      candidates.push({ type: 'DOSSIER', id: d.id, name: `Dossier fusionné existant (Créé le ${new Date(d.createdAt).toLocaleDateString('fr-FR')})` });
+    });
+
+    const clientProjects = projects.filter(p => p.clientId === project.clientId);
+    clientProjects.forEach(p => {
+      if (p.encaissements) {
+        p.encaissements.forEach(e => {
+          if (!e.isCombined && (e.status === 'IN_PROGRESS' || e.status === 'PARTIAL') && e.id !== showActivationModal.encaissementId) {
+            candidates.push({ type: 'SINGLE', id: e.id, projectId: p.id, name: `Encaissement ${e.mode} - Projet: ${p.name}` });
+          }
+        });
+      }
+    });
+
+    return candidates;
+  }, [showActivationModal.isOpen, project, dossiersPaiement, projects]);
+
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
 
@@ -588,9 +616,17 @@ export default function ProjectDetails() {
                         </span>
                       )}
                       {isUpcoming && (
-                        <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
-                          <Clock className="w-4 h-4" /> En attente
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
+                            <Clock className="w-4 h-4" /> En attente
+                          </span>
+                          <button
+                            onClick={() => setShowActivationModal({ isOpen: true, encaissementId: enc.id })}
+                            className="px-4 py-2 bg-purple-100 text-purple-700 hover:bg-purple-200 hover:text-purple-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2"
+                          >
+                            <Power className="w-4 h-4" /> Activer
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1203,6 +1239,79 @@ export default function ProjectDetails() {
         </div>
         );
       })()}
+
+      {/* MODAL: Activation Anticipée */}
+      {showActivationModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-lg">
+            <button type="button" onClick={() => setShowActivationModal({ isOpen: false, encaissementId: null })} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
+            
+            <div className="space-y-1 mb-6">
+              <h3 className="font-extrabold text-slate-900 text-xl flex items-center gap-3">
+                <Power className="w-6 h-6 text-purple-500" />
+                Activation Anticipée
+              </h3>
+              <p className="text-slate-500 text-xs font-bold">Activer la facturation de cette maintenance avant la fin de l'exercice gratuit.</p>
+            </div>
+
+            <div className="bg-purple-50 border border-purple-100 p-4 rounded-xl mb-6">
+              <p className="text-sm font-bold text-purple-900 mb-2">Attention :</p>
+              <ul className="list-disc pl-5 text-xs text-purple-700 space-y-1">
+                <li>La phase "Maintenance Gratuite" sera automatiquement marquée comme terminée/sautée.</li>
+                <li>La date de début de l'encaissement de la maintenance sera fixée à aujourd'hui.</li>
+              </ul>
+            </div>
+
+            {mergeCandidates.length > 0 ? (
+              <div className="space-y-3 mb-6">
+                <label className="text-sm font-extrabold text-slate-800">Souhaitez-vous fusionner cet encaissement avec un autre en cours ?</label>
+                <select 
+                  value={selectedMergeCandidate} 
+                  onChange={(e) => setSelectedMergeCandidate(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-purple-500"
+                >
+                  <option value="none">Non, l'activer séparément</option>
+                  {mergeCandidates.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600 font-bold mb-6">Aucun autre encaissement en cours détecté pour ce client.</p>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setShowActivationModal({ isOpen: false, encaissementId: null })}
+                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+              >
+                Annuler
+              </button>
+              <button 
+                onClick={() => {
+                  const candidate = mergeCandidates.find(c => c.id === selectedMergeCandidate);
+                  let mergeConfig = undefined;
+                  if (candidate) {
+                    if (candidate.type === 'DOSSIER') {
+                      mergeConfig = { dossierId: candidate.id };
+                    } else {
+                      mergeConfig = { otherEncaissementId: candidate.id, otherProjectId: candidate.projectId, clientId: project.clientId };
+                    }
+                  }
+                  
+                  if (showActivationModal.encaissementId) {
+                    activateMaintenanceEncaissement(project.id, showActivationModal.encaissementId, mergeConfig);
+                  }
+                  setShowActivationModal({ isOpen: false, encaissementId: null });
+                }}
+                className="px-5 py-2.5 rounded-xl font-bold text-white bg-purple-600 hover:bg-purple-700 transition-colors shadow-md"
+              >
+                Activer la Maintenance
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* NEW MODAL: Facturation */}
       {showFacturation && (
