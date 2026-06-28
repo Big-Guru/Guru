@@ -70,7 +70,7 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                       <div className="flex items-center gap-3 flex-wrap">
                         <h4 className="font-black text-slate-900 text-lg break-words">{combinedNames} - {combinedProducts}</h4>
                       </div>
-                      <span className="text-slate-500 text-xs font-bold mt-2 block">Mode : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} • Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+                      <span className="text-slate-500 text-xs font-bold mt-2 block">Mode : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} • Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
                     </div>
                     <span className={cn(
                       "whitespace-nowrap shrink-0 mt-1 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",

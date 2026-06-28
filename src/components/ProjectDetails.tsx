@@ -543,7 +543,7 @@ export default function ProjectDetails() {
                             "whitespace-nowrap",
                             isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
                           )}>
-                            Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                            Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
                           </span>
                         </div>
                       </div>
@@ -1243,7 +1243,7 @@ export default function ProjectDetails() {
                               </button>
                             )}
                           </div>
-                          <span className="text-slate-500 text-xs font-bold mt-1 block">Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+                          <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
                         </div>
                         <span className={cn(
                           "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",

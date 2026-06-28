@@ -438,7 +438,7 @@ export default function ClientDetails() {
                         <span className={cn(
                           isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
                         )}>
-                          Échéance : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                          Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
                         </span>
                       </div>
                     </div>
@@ -529,8 +529,8 @@ export default function ClientDetails() {
                             </div>
                           </div>
                           <div className="text-right">
-                            <div className="text-[10px] text-slate-400 font-medium">Échéance</div>
-                            <div className="text-xs font-bold text-slate-700">{new Date(enc.targetDate).toLocaleDateString('fr-FR', {month: 'short', year:'numeric'})}</div>
+                            <div className="text-[10px] text-slate-400 font-medium">Début</div>
+                            <div className="text-sm font-bold text-slate-900">{new Date(enc.targetDate).toLocaleDateString('fr-FR')}</div>
                           </div>
                         </div>
                       ))}
@@ -780,7 +780,7 @@ export default function ClientDetails() {
                       </div>
                     </div>
                     <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">
-                      Échéance: {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}
+                      Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}
                     </div>
                   </div>
                   

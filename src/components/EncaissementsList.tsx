@@ -24,7 +24,7 @@ export default function EncaissementsList() {
     }))
   ).filter(e => {
     if (e.status === 'DONE' || !e.client) return false;
-    // N'afficher que les encaissements qui sont à 30 jours (ou moins) de leur échéance, ou en retard
+    // N'afficher que les encaissements qui sont à 30 jours (ou moins) de leur date de début, ou en retard
     const daysUntilDue = differenceInDays(new Date(e.targetDate), new Date());
     return daysUntilDue <= 30;
   });

@@ -278,7 +278,7 @@ export default function Dashboard() {
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
               <Banknote className="w-4 h-4 text-emerald-500" />
-              Échéances proches
+              Prochains débuts
             </h3>
             <Link to="/encaissements" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
               Voir tout
