@@ -364,9 +364,21 @@ export default function ProjectDetails() {
         {(() => {
           const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
           const encaissementPhase = acquisitionContract?.phases?.find(p => p.name === 'Encaissement');
-          const isEncaissementActiveOrDone = encaissementPhase && (encaissementPhase.status === 'ACTIVE' || encaissementPhase.status === 'DONE');
           const missingAcquisitionDocs = encaissementPhase?.tasks?.filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS') || [];
-          const missingDocsCount = isEncaissementActiveOrDone ? missingAcquisitionDocs.length : 0;
+          
+          let missingDocsCount = 0;
+          const activeEncaissements = project.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
+          
+          activeEncaissements.forEach(enc => {
+            if (enc.mode === 'Acquisition') {
+              missingDocsCount += missingAcquisitionDocs.length;
+            } else if (enc.mode === 'Maintenance') {
+              if (enc.proforma?.status === 'PENDING') missingDocsCount++;
+              if (enc.bc?.status === 'PENDING') missingDocsCount++;
+              if (enc.facture?.status === 'PENDING') missingDocsCount++;
+              if (enc.status !== 'DONE') missingDocsCount++;
+            }
+          });
 
           return (
             <div className="flex flex-wrap items-center justify-end gap-3 shrink-0">
@@ -1270,8 +1282,8 @@ export default function ProjectDetails() {
       {showBilling && (() => {
         const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
         const encaissementPhase = acquisitionContract?.phases?.find(p => p.name === 'Encaissement');
-        const isEncaissementActiveOrDone = encaissementPhase && (encaissementPhase.status === 'ACTIVE' || encaissementPhase.status === 'DONE');
         const missingAcquisitionDocs = encaissementPhase?.tasks?.filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS') || [];
+        const activeEncaissementsList = project.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
 
         return (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1281,91 +1293,94 @@ export default function ProjectDetails() {
               <h3 className="font-extrabold text-slate-900 text-base">Gestion des Documents Administratifs</h3>
             </div>
             <div className="flex-1 overflow-y-auto pr-2 space-y-8">
-              
-              {isEncaissementActiveOrDone && (
-                <div className="bg-blue-50/50 border border-blue-100 p-6 rounded-[24px]">
-                  <h4 className="font-extrabold text-blue-900 text-sm mb-4 flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-blue-500" />
-                    Acquisition (Phase Encaissement) : Documents requis
-                  </h4>
-                  {missingAcquisitionDocs.length > 0 ? (
-                    <div className="space-y-2">
-                      {missingAcquisitionDocs.map(doc => (
-                        <div key={doc.id} className="bg-white border border-blue-100 p-4 rounded-2xl flex items-center gap-3 shadow-sm">
-                          <div className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
-                          <span className="text-xs font-bold text-slate-700">{doc.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center gap-3">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                      <p className="text-xs text-emerald-700 font-bold">
-                        Tous les documents administratifs de l'acquisition ont été traités.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div className="space-y-4">
-                <h4 className="font-extrabold text-emerald-900 text-sm flex items-center gap-2 border-b border-slate-100 pb-2">
-                  <FolderKanban className="w-4 h-4 text-emerald-500" />
-                  Exercices de Maintenance
-                </h4>
-                <form onSubmit={handleAddMaintenance} className="bg-emerald-50/50 border border-emerald-100 p-5 rounded-2xl flex flex-col sm:flex-row gap-4 items-end">
-                <div className="flex-1 space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Année</label>
-                  <input type="number" required value={newMaintenanceYear} onChange={e => setNewMaintenanceYear(parseInt(e.target.value))} className="w-full bg-white border border-emerald-200 rounded-xl px-3.5 py-2 text-xs focus:border-emerald-500 outline-none" />
-                </div>
-                <div className="flex-1 space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Date début</label>
-                  <input type="date" required value={newMaintenanceDate} onChange={e => setNewMaintenanceDate(e.target.value)} className="w-full bg-white border border-emerald-200 rounded-xl px-3.5 py-2 text-xs focus:border-emerald-500 outline-none" />
-                </div>
-                <button type="submit" className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md">Ajouter l'exercice</button>
-              </form>
-              <div className="space-y-6">
-                {(project.maintenances || []).slice().reverse().map((m) => (
-                  <div key={m.id} className="border border-slate-200/80 rounded-2xl bg-white shadow-sm overflow-hidden">
-                    <div className="bg-slate-50 border-b border-slate-200/80 p-4 flex justify-between items-center">
-                      <div className="space-y-0.5">
-                        <h4 className="font-extrabold text-slate-900 text-sm">Exercice {m.year}</h4>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <select value={m.encaissement?.status || 'PENDING'} onChange={(e) => updateMaintenanceField(m.id, 'encaissement', { status: e.target.value })} className="text-xs font-bold bg-white px-3 py-1.5 rounded-lg border cursor-pointer">
-                          <option value="PENDING">Encaissement: En attente</option>
-                          <option value="DONE">Encaissement: Effectué</option>
-                        </select>
-                        <button onClick={() => deleteMaintenance(project.id, m.id)} className="text-red-500 bg-red-50 p-2 rounded-lg"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-5">
-                      {[
-                        { key: 'proforma', name: 'Facture Proforma' },
-                        { key: 'convention', name: 'Convention' },
-                        { key: 'bcOds', name: 'Bon de commande / ODS' },
-                        { key: 'facture', name: 'Facture définitive' },
-                      ].map(docMeta => {
-                        const docTrack = (m as any)[docMeta.key] || { status: 'MISSING' };
-                        return (
-                          <div key={docMeta.key} className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col gap-2">
-                            <span className="font-extrabold text-[11px] text-slate-800 uppercase tracking-wide">{docMeta.name}</span>
-                            <select value={docTrack.status} onChange={e => updateMaintenanceDoc(m.id, docMeta.key, { status: e.target.value as any })} className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none cursor-pointer">
-                              <option value="MISSING">Manquant</option>
-                              <option value="PREPARED">Préparé</option>
-                              <option value="VALIDATED">Validé</option>
-                              <option value="DEPOSITED">Déposé</option>
-                              <option value="RECUPERATED">Récupéré</option>
-                              <option value="IGNORED">Ignoré</option>
-                            </select>
+                {activeEncaissementsList.map(enc => {
+                  let contractDocs: { id: string, name: string, isMissing: boolean, onToggle: () => void }[] = [];
+                  let contractTitle: string = enc.mode;
+                  
+                  if (enc.mode === 'Acquisition') {
+                    if (acquisitionContract && encaissementPhase) {
+                       contractDocs = (encaissementPhase.tasks || []).map(t => ({
+                          id: t.id,
+                          name: t.name,
+                          isMissing: t.status === 'PENDING' || t.status === 'IN_PROGRESS',
+                          onToggle: () => {
+                             const newStatus = (t.status === 'PENDING' || t.status === 'IN_PROGRESS') ? 'DONE' : 'PENDING';
+                             updateTaskInContract(project.id, acquisitionContract.id, encaissementPhase.id, t.id, { status: newStatus as any });
+                          }
+                       }));
+                    }
+                  } else if (enc.mode === 'Maintenance') {
+                    contractTitle = enc.year !== undefined ? `Maintenance (Année ${enc.year})` : 'Maintenance';
+                    contractDocs = [
+                      {
+                        id: 'proforma',
+                        name: 'Proforma',
+                        isMissing: enc.proforma?.status === 'PENDING',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
+                      },
+                      {
+                        id: 'bc',
+                        name: 'Bon de Commande',
+                        isMissing: enc.bc?.status === 'PENDING',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: enc.bc?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
+                      },
+                      {
+                        id: 'facture',
+                        name: 'Facture définitive',
+                        isMissing: enc.facture?.status === 'PENDING',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
+                      },
+                      {
+                        id: 'service_fait',
+                        name: 'Service fait',
+                        isMissing: enc.status !== 'DONE',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { status: enc.status !== 'DONE' ? 'DONE' : 'IN_PROGRESS' })
+                      }
+                    ];
+                  }
+
+                  const missingCount = contractDocs.filter(d => d.isMissing).length;
+
+                  return (
+                    <details key={enc.id} className="group bg-blue-50/30 border border-blue-100 rounded-[24px] overflow-hidden" open>
+                      <summary className="font-extrabold text-blue-900 text-sm p-5 cursor-pointer select-none flex items-center justify-between hover:bg-blue-50/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-5 h-5 text-blue-500" />
+                          {contractTitle} : Documents requis
+                          {missingCount > 0 && (
+                            <span className="bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full text-[10px] ml-2">{missingCount} manquant(s)</span>
+                          )}
+                        </div>
+                        <div className="w-8 h-8 rounded-full bg-blue-100/50 flex items-center justify-center text-blue-500 group-open:rotate-180 transition-transform">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </div>
+                      </summary>
+                      <div className="p-5 pt-0 border-t border-blue-100/50 bg-white/50">
+                          <div className="space-y-2 mt-4">
+                            {contractDocs.map((doc) => (
+                              <div key={doc.id} className={`border p-4 rounded-2xl flex items-center justify-between gap-3 shadow-sm transition-colors ${doc.isMissing ? 'bg-white border-blue-100' : 'bg-emerald-50 border-emerald-200'}`}>
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-300 ${doc.isMissing ? 'bg-red-400' : 'bg-emerald-500'}`} />
+                                  <span className={`text-xs font-bold transition-all duration-300 ${doc.isMissing ? 'text-slate-700' : 'text-emerald-800 line-through opacity-70'}`}>{doc.name}</span>
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={(e) => { e.preventDefault(); doc.onToggle(); }}
+                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200 ease-in-out ${doc.isMissing ? 'bg-slate-200' : 'bg-emerald-500'}`}
+                                >
+                                  <span className="sr-only">Toggle status</span>
+                                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${doc.isMissing ? 'translate-x-0' : 'translate-x-4'}`} />
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+                      </div>
+                    </details>
+                  );
+                })}
               </div>
-            </div>
+
           </div>
           </div>
         </div>
