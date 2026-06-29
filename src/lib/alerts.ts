@@ -32,105 +32,40 @@ export function calculateAlerts(project: Project): Alert[] {
     return alerts;
   }
 
-  const installDate = parseISO(project.installationDate);
-  const trialEndDate = addMonths(installDate, 6);
-  const daysUntilTrialEnd = differenceInDays(trialEndDate, today);
-
-  // 1. Acquisition Alert: Proforma Warning (1 month before trial end)
-  if (daysUntilTrialEnd <= 30 && project.acqProforma?.status === 'MISSING') {
-    alerts.push({
-      id: uuidv4(),
-      projectId: project.id,
-      level: daysUntilTrialEnd < 0 ? 'CRITICAL' : 'WARNING',
-      message: daysUntilTrialEnd < 0 
-        ? `La période d'essai est terminée depuis ${Math.abs(daysUntilTrialEnd)} jours. Proforma d'acquisition manquante !`
-        : `Fin de la période d'essai dans ${daysUntilTrialEnd} jours. Préparez la proforma d'acquisition.`,
-      documentType: 'PROFORMA_ACQ'
-    });
-  }
-
-  // General acquisition missing docs alerts (Critiques if Installation is done)
-  const docsReq = [
-    { name: 'Bon de commande / ODS', doc: project.acqBcOds, key: 'BC_ACQ' },
-    { name: 'Convention', doc: project.acqConvention, key: 'CONV_ACQ' },
-    { name: 'Facture définitive', doc: project.acqFacture, key: 'FACT_ACQ' },
-    { name: 'Service Fait', doc: project.acqServiceFait, key: 'SF_ACQ' }
-  ];
-
-  // If Proforma is sent/validated, we expect the rest soon.
-  if (project.acqProforma?.status === 'VALIDATED' || project.acqProforma?.status === 'DEPOSITED') {
-    docsReq.forEach(req => {
-      if (req.doc?.status === 'MISSING') {
-        alerts.push({
-          id: uuidv4(),
-          projectId: project.id,
-          level: 'CRITICAL',
-          message: `Document obligatoire d'acquisition manquant : ${req.name}`,
-          documentType: req.key
-        });
-      }
-    });
-
-    if (project.acqEncaissement?.status === 'PENDING') {
-      alerts.push({
-        id: uuidv4(),
-        projectId: project.id,
-        level: 'CRITICAL',
-        message: `Encaissement de l'acquisition en attente.`,
-        documentType: 'ENC_ACQ'
-      });
-    }
-  }
-
-  // 2. Maintenance Alerts
-  if (project.maintenances) {
-    // Sort maintenances by year
-    const sortedMaintenances = [...project.maintenances].sort((a,b) => a.year - b.year);
-
-    // For each existing maintenance phase, check its docs
-    sortedMaintenances.forEach((m) => {
-      if (m.proforma?.status === 'VALIDATED' || m.proforma?.status === 'DEPOSITED') {
-        const mDocsReq = [
-          { name: 'Bon de commande / Convention (Maintenance)', doc: m.bcOds, key: 'BC_MAIN' },
-          { name: 'Facture définitive (Maintenance)', doc: m.facture, key: 'FACT_MAIN' }
-        ];
-
-        mDocsReq.forEach(req => {
-          if (req.doc?.status === 'MISSING') {
+  // Missing Documents from Encaissements (New Logic)
+  const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
+  const encaissementPhase = acquisitionContract?.phases?.find(ph => ph.name === 'Encaissement');
+  const activeEncaissementsList = project.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
+  
+  activeEncaissementsList.forEach(enc => {
+    if (enc.mode === 'Acquisition') {
+      if (acquisitionContract && encaissementPhase) {
+         (encaissementPhase.tasks || []).filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS').forEach(t => {
             alerts.push({
               id: uuidv4(),
               projectId: project.id,
               level: 'CRITICAL',
-              message: `Document de maintenance manquant pour ${m.year} : ${req.name}`,
-              documentType: req.key,
-              maintenanceId: m.id
+              message: `Document d'acquisition manquant : ${t.name}`,
+              documentType: 'ENC_ACQ'
             });
-          }
-        });
-
-        if (m.encaissement?.status === 'PENDING') {
-          alerts.push({
-            id: uuidv4(),
-            projectId: project.id,
-            level: 'CRITICAL',
-            message: `Encaissement de la maintenance ${m.year} en attente.`,
-            documentType: 'ENC_MAIN',
-            maintenanceId: m.id
-          });
-        }
-      } else if (m.proforma?.status === 'MISSING') {
-        // General reminder if the year has started
-        alerts.push({
-            id: uuidv4(),
-            projectId: project.id,
-            level: 'CRITICAL',
-            message: `Proforma de maintenance manquante pour l'année ${m.year}`,
-            documentType: 'PROFORMA_MAIN',
-            maintenanceId: m.id
          });
       }
-    });
-  }
+    } else if (enc.mode === 'Maintenance') {
+       const yearText = enc.year !== undefined ? `Année ${enc.year}` : '';
+       if (enc.proforma?.status === 'PENDING') {
+          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Proforma de maintenance manquante (${yearText})`, documentType: 'PROFORMA_MAIN' });
+       }
+       if (enc.bc?.status === 'PENDING') {
+          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Bon de Commande manquant (${yearText})`, documentType: 'BC_MAIN' });
+       }
+       if (enc.facture?.status === 'PENDING') {
+          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Facture définitive manquante (${yearText})`, documentType: 'FACT_MAIN' });
+       }
+       if (enc.status !== 'DONE') {
+          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Service Fait manquant (${yearText})`, documentType: 'ENC_MAIN' });
+       }
+    }
+  });
 
   // 3. Contract-based Alerts (Also run if installationDate is defined)
   if (project.contracts) {

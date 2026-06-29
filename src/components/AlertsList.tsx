@@ -1,71 +1,48 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { calculateAlerts } from '../lib/alerts';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, EyeOff } from 'lucide-react';
+import { AlertCircle, AlertTriangle, EyeOff, X, FileText } from 'lucide-react';
 import { Alert, Project } from '../types';
 import SearchInput from './SearchInput';
 
 export default function AlertsList() {
-  const { clients, projects, updateProject, updateMaintenance } = useStore();
-  const [expandedProjects, setExpandedProjects] = useState<string[]>([]);
+  const { clients, projects, updateProject, updateMaintenance, updateTaskInContract, updateEncaissement } = useStore();
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   
-  const filteredAlertsByProject = projects.map(p => ({
-    project: p,
-    client: clients.find(c => c.id === p.clientId),
-    alerts: calculateAlerts(p)
-  })).filter(item => {
-    if (item.alerts.length === 0) return false;
+  const filteredAlertsByProject = projects.map(p => {
+    let missingDocs = 0;
+    const acquisitionContract = p.contracts?.find(c => c.mode === 'Acquisition');
+    const encaissementPhase = acquisitionContract?.phases?.find(ph => ph.name === 'Encaissement');
+    const activeEncaissementsList = p.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
+    
+    activeEncaissementsList.forEach(enc => {
+      if (enc.mode === 'Acquisition') {
+        if (acquisitionContract && encaissementPhase) {
+           missingDocs += (encaissementPhase.tasks || []).filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS').length;
+        }
+      } else if (enc.mode === 'Maintenance') {
+         if (enc.proforma?.status === 'PENDING') missingDocs++;
+         if (enc.bc?.status === 'PENDING') missingDocs++;
+         if (enc.facture?.status === 'PENDING') missingDocs++;
+         if (enc.status !== 'DONE') missingDocs++;
+      }
+    });
+
+    return {
+      project: p,
+      client: clients.find(c => c.id === p.clientId),
+      alertsCount: missingDocs
+    };
+  }).filter(item => {
+    if (item.alertsCount === 0) return false;
     const searchLower = search.toLowerCase();
     return (
       item.project.name.toLowerCase().includes(searchLower) ||
       (item.client?.name || '').toLowerCase().includes(searchLower)
     );
   });
-
-  const toggleExpand = (e: React.MouseEvent, projectId: string) => {
-    e.preventDefault();
-    setExpandedProjects(prev => prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]);
-  };
-
-  const handleIgnoreAlert = (e: React.MouseEvent, alert: Alert, project: Project) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!alert.documentType) return;
-    
-    const updatePayload: Partial<Project> = {};
-    
-    switch (alert.documentType) {
-      case 'PROFORMA_ACQ': updatePayload.acqProforma = { ...project.acqProforma, status: 'IGNORED' }; break;
-      case 'BC_ACQ': updatePayload.acqBcOds = { ...project.acqBcOds, status: 'IGNORED' }; break;
-      case 'CONV_ACQ': updatePayload.acqConvention = { ...project.acqConvention, status: 'IGNORED' }; break;
-      case 'FACT_ACQ': updatePayload.acqFacture = { ...project.acqFacture, status: 'IGNORED' }; break;
-      case 'SF_ACQ': updatePayload.acqServiceFait = { ...project.acqServiceFait, status: 'IGNORED' }; break;
-    }
-    
-    if (Object.keys(updatePayload).length > 0) {
-      updateProject(project.id, updatePayload);
-      return;
-    }
-
-    if (alert.maintenanceId) {
-      const maintenance = project.maintenances.find(m => m.id === alert.maintenanceId);
-      if (!maintenance) return;
-      
-      const maintenanceUpdates: any = {};
-      switch (alert.documentType) {
-        case 'PROFORMA_MAIN': maintenanceUpdates.proforma = { ...maintenance.proforma, status: 'IGNORED' }; break;
-        case 'BC_MAIN': maintenanceUpdates.bcOds = { ...maintenance.bcOds, status: 'IGNORED' }; break;
-        case 'FACT_MAIN': maintenanceUpdates.facture = { ...maintenance.facture, status: 'IGNORED' }; break;
-      }
-      
-      if (Object.keys(maintenanceUpdates).length > 0) {
-        updateMaintenance(project.id, alert.maintenanceId, maintenanceUpdates);
-      }
-    }
-  };
 
   return (
     <div className="flex flex-col h-full gap-4">
@@ -92,87 +69,164 @@ export default function AlertsList() {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {filteredAlertsByProject.map(({ project, client, alerts }) => {
-                  const isExpanded = expandedProjects.includes(project.id);
-                  const criticalCount = alerts.filter(a => a.level === 'CRITICAL').length;
-                  const warningCount = alerts.filter(a => a.level === 'WARNING').length;
-
+                {filteredAlertsByProject.map(({ project, client, alertsCount }) => {
                   return (
                   <div 
                     key={project.id} 
-                    className="bg-white border border-slate-200/60 rounded-xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:-translate-y-0.5 hover:border-blue-200 transition-all duration-300 flex flex-col group block overflow-hidden"
+                    className="group relative bg-white border border-slate-200/80 rounded-[20px] shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_30px_rgba(239,68,68,0.12)] hover:-translate-y-0.5 hover:border-red-200 transition-all duration-300 flex flex-col overflow-hidden cursor-pointer"
+                    onClick={(e) => { e.preventDefault(); setSelectedProjectId(project.id); }}
                   >
-                    <div className="p-5 flex flex-col md:flex-row gap-4 md:items-center justify-between cursor-pointer" onClick={(e) => toggleExpand(e, project.id)}>
-                      <div className="md:w-1/2 shrink-0">
-                        <Link to={`/projects/${project.id}`} className="font-bold text-lg text-slate-800 leading-tight hover:text-blue-600 transition-colors inline-block" onClick={e => e.stopPropagation()}>
-                          {client?.name || 'Inconnu'} <span className="text-slate-400 font-normal mx-1">-</span> {project.name}
-                        </Link>
-                        <div className="text-sm font-medium text-slate-500 mt-2 flex items-center flex-wrap gap-2">
-                           <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold border border-slate-200">{project.product}</span> 
-                           <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold border border-blue-100">{project.version}</span>
+                    <div className="absolute inset-0 bg-gradient-to-br from-red-50/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                    
+                    <div className="p-4 md:p-5 flex flex-col md:flex-row gap-4 md:items-center justify-between relative z-10">
+                      <div className="md:w-7/12 shrink-0">
+                        <div className="flex items-center gap-3 mb-1">
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-red-100 to-red-50 text-red-600 flex items-center justify-center shrink-0 shadow-sm border border-red-200/60 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                             <AlertTriangle className="w-4 h-4" />
+                          </div>
+                          <Link to={`/projects/${project.id}`} className="font-extrabold text-lg text-slate-800 leading-tight hover:text-red-600 transition-colors inline-block" onClick={e => e.stopPropagation()}>
+                            {client?.name || 'Inconnu'} <span className="text-slate-300 font-normal mx-1.5">/</span> {project.name}
+                          </Link>
+                        </div>
+                        <div className="text-xs font-bold text-slate-500 flex items-center flex-wrap gap-2 pl-[44px]">
+                           <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] uppercase tracking-wider border border-slate-200 shadow-sm">{project.product}</span> 
+                           <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-[9px] uppercase tracking-wider border border-blue-100 shadow-sm">{project.version}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <div className="flex gap-2">
-                          {criticalCount > 0 && (
-                            <span className="flex items-center gap-1.5 bg-red-50 text-red-700 px-3 py-1 rounded-full text-xs font-bold border border-red-100">
-                               <AlertTriangle className="w-3.5 h-3.5" />
-                               {criticalCount} <span className="hidden sm:inline">Critique{criticalCount > 1 ? 's' : ''}</span>
-                            </span>
-                          )}
-                          {warningCount > 0 && (
-                            <span className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1 rounded-full text-xs font-bold border border-amber-100">
-                               <AlertCircle className="w-3.5 h-3.5" />
-                               {warningCount} <span className="hidden sm:inline">Avertissement{warningCount > 1 ? 's' : ''}</span>
-                            </span>
-                          )}
+                      <div className="flex items-center justify-end gap-4 pl-[44px] md:pl-0 mt-3 md:mt-0">
+                        {alertsCount > 0 && (
+                          <div className="flex items-center gap-2.5 bg-gradient-to-r from-red-50 to-white text-red-700 px-3 py-1.5 rounded-xl border border-red-100 shadow-sm group-hover:border-red-300 group-hover:shadow-md group-hover:shadow-red-500/10 transition-all duration-300">
+                             <FileText className="w-4 h-4 text-red-500" />
+                             <div className="flex flex-col leading-none">
+                               <span className="font-extrabold text-sm">{alertsCount} document{alertsCount > 1 ? 's' : ''}</span>
+                               <span className="text-[9px] font-bold opacity-70 uppercase tracking-widest mt-0.5">Manquant{alertsCount > 1 ? 's' : ''}</span>
+                             </div>
+                          </div>
+                        )}
+                        <div className="w-8 h-8 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 group-hover:bg-red-500 group-hover:text-white group-hover:border-red-600 transition-all duration-300 shadow-sm group-hover:shadow-md group-hover:shadow-red-500/30 shrink-0">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-0.5 transition-transform"><polyline points="9 18 15 12 9 6"></polyline></svg>
                         </div>
-                        <button className="p-1.5 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-100 hover:text-slate-600 transition-colors">
-                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        </button>
                       </div>
                     </div>
-                    
-                    {isExpanded && (
-                      <div className="border-t border-slate-100 p-5 bg-slate-50/50">
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                           {alerts.map(a => (
-                             <div key={a.id} className={cn("flex gap-3 items-center p-3 rounded-xl border bg-white shadow-sm", a.level === 'CRITICAL' ? 'border-red-200/60 shadow-red-500/5' : 'border-amber-200/60 shadow-amber-500/5')}>
-                               <div className={cn("w-8 h-8 rounded-full flex items-center justify-center shrink-0", a.level === 'CRITICAL' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600')}>
-                                 {a.level === 'CRITICAL' ? <AlertTriangle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                               </div>
-                               <div className="flex-1">
-                                 <span className={cn("text-xs leading-snug font-bold block", a.level === 'CRITICAL' ? 'text-slate-800' : 'text-slate-700')}>
-                                   {a.message}
-                                 </span>
-                               </div>
-                               <div className="flex gap-2 shrink-0">
-                                 {a.documentType && !a.documentType.startsWith('ENC_') && (
-                                   <button 
-                                     onClick={(e) => handleIgnoreAlert(e, a, project)}
-                                     title="Ignorer ce document"
-                                     className="text-slate-400 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 px-2 py-1 flex items-center justify-center rounded transition-colors"
-                                   >
-                                     <EyeOff className="w-4 h-4" />
-                                   </button>
-                                 )}
-                                 <Link to={`/projects/${project.id}`} className="text-[10px] uppercase font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors whitespace-nowrap hidden sm:block h-6 flex items-center justify-center">
-                                   Traiter
-                                 </Link>
-                               </div>
-                             </div>
-                           ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
-                )})}
+                  );
+                })}
                </div>
              )}
            </div>
          </div>
        </div>
-     </div>
-   );
- }
+
+      {selectedProjectId && (() => {
+        const project = projects.find(p => p.id === selectedProjectId);
+        if (!project) return null;
+
+        const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
+        const encaissementPhase = acquisitionContract?.phases?.find(p => p.name === 'Encaissement');
+        const activeEncaissementsList = project.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
+
+        return (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedProjectId(null)}>
+          <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-5xl max-h-[90vh] flex flex-col justify-between overflow-hidden" onClick={e => e.stopPropagation()}>
+            <button type="button" onClick={() => setSelectedProjectId(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
+            <div className="space-y-1 mb-5">
+              <h3 className="font-extrabold text-slate-900 text-base">Gestion des Documents Administratifs</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2 space-y-8">
+              <div className="space-y-4">
+                {activeEncaissementsList.map(enc => {
+                  let contractDocs: { id: string, name: string, isMissing: boolean, onToggle: () => void }[] = [];
+                  let contractTitle: string = enc.mode;
+                  
+                  if (enc.mode === 'Acquisition') {
+                    if (acquisitionContract && encaissementPhase) {
+                       contractDocs = (encaissementPhase.tasks || []).map(t => ({
+                          id: t.id,
+                          name: t.name,
+                          isMissing: t.status === 'PENDING' || t.status === 'IN_PROGRESS',
+                          onToggle: () => {
+                             const newStatus = (t.status === 'PENDING' || t.status === 'IN_PROGRESS') ? 'DONE' : 'PENDING';
+                             updateTaskInContract(project.id, acquisitionContract.id, encaissementPhase.id, t.id, { status: newStatus as any });
+                          }
+                       }));
+                    }
+                  } else if (enc.mode === 'Maintenance') {
+                    contractTitle = enc.year !== undefined ? `Maintenance (Année ${enc.year})` : 'Maintenance';
+                    contractDocs = [
+                      {
+                        id: 'proforma',
+                        name: 'Proforma',
+                        isMissing: enc.proforma?.status === 'PENDING',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
+                      },
+                      {
+                        id: 'bc',
+                        name: 'Bon de Commande',
+                        isMissing: enc.bc?.status === 'PENDING',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: enc.bc?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
+                      },
+                      {
+                        id: 'facture',
+                        name: 'Facture définitive',
+                        isMissing: enc.facture?.status === 'PENDING',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
+                      },
+                      {
+                        id: 'service_fait',
+                        name: 'Service fait',
+                        isMissing: enc.status !== 'DONE',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { status: enc.status !== 'DONE' ? 'DONE' : 'IN_PROGRESS' })
+                      }
+                    ];
+                  }
+
+                  const missingCount = contractDocs.filter(d => d.isMissing).length;
+
+                  return (
+                    <details key={enc.id} className="group bg-blue-50/30 border border-blue-100 rounded-[24px] overflow-hidden" open>
+                      <summary className="font-extrabold text-blue-900 text-sm p-5 cursor-pointer select-none flex items-center justify-between hover:bg-blue-50/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-5 h-5 text-blue-500" />
+                          {contractTitle} : Documents requis
+                          {missingCount > 0 && (
+                            <span className="bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full text-[10px] ml-2">{missingCount} manquant(s)</span>
+                          )}
+                        </div>
+                        <div className="w-8 h-8 rounded-full bg-blue-100/50 flex items-center justify-center text-blue-500 group-open:rotate-180 transition-transform">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </div>
+                      </summary>
+                      <div className="p-5 pt-0 border-t border-blue-100/50 bg-white/50">
+                          <div className="space-y-2 mt-4">
+                            {contractDocs.map((doc) => (
+                              <div key={doc.id} className={`border p-4 rounded-2xl flex items-center justify-between gap-3 shadow-sm transition-colors ${doc.isMissing ? 'bg-white border-blue-100' : 'bg-emerald-50 border-emerald-200'}`}>
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-300 ${doc.isMissing ? 'bg-red-400' : 'bg-emerald-500'}`} />
+                                  <span className={`text-xs font-bold transition-all duration-300 ${doc.isMissing ? 'text-slate-700' : 'text-emerald-800 line-through opacity-70'}`}>{doc.name}</span>
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={(e) => { e.preventDefault(); doc.onToggle(); }}
+                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200 ease-in-out ${doc.isMissing ? 'bg-slate-200' : 'bg-emerald-500'}`}
+                                >
+                                  <span className="sr-only">Toggle status</span>
+                                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${doc.isMissing ? 'translate-x-0' : 'translate-x-4'}`} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+    </div>
+  );
+}

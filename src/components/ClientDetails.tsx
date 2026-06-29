@@ -781,8 +781,23 @@ export default function ClientDetails() {
                         <span>{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span>
                       </div>
                     </div>
-                    <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">
-                      Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}
+                    <div className="flex items-center gap-3">
+                      <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">
+                        Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const newGroup = selectedFusionGroup.filter((_, i) => i !== idx);
+                          if (newGroup.length === 0) setSelectedFusionGroup(null);
+                          else setSelectedFusionGroup(newGroup);
+                        }}
+                        className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                        title="Retirer cet encaissement de la fusion"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                   

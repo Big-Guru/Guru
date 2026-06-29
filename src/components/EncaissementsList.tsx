@@ -5,6 +5,7 @@ import { differenceInDays } from 'date-fns';
 import FacturationDossierModal from './FacturationDossierModal';
 import FacturationSingleModal from './FacturationSingleModal';
 import { cn } from '../lib/utils';
+import { Link } from 'react-router-dom';
 
 export default function EncaissementsList() {
   const { clients, projects, dossiersPaiement } = useStore();
@@ -63,6 +64,17 @@ export default function EncaissementsList() {
     e.projectName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const groupedForFusion = singleEncaissements.reduce((acc, curr) => {
+    if (!curr.client) return acc;
+    const monthYear = curr.targetDate.substring(0, 7);
+    const key = `${curr.client.id}_${monthYear}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(curr);
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  const combinableGroups = Object.entries(groupedForFusion).filter(([_, group]) => group.length >= 2);
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -82,6 +94,34 @@ export default function EncaissementsList() {
           />
         </div>
       </div>
+
+      {combinableGroups.length > 0 && (
+        <div className="space-y-3 mb-8">
+          {combinableGroups.map(([key, group]) => {
+            const client = group[0].client;
+            const monthYear = group[0].targetDate.substring(0, 7);
+            return (
+              <div key={key} className="bg-gradient-to-r from-indigo-50/80 to-purple-50/80 border border-indigo-100/50 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-4 relative z-10 w-full">
+                   <div className="bg-white border border-indigo-100 p-2.5 rounded-xl shadow-sm shrink-0">
+                     <FolderKanban className="w-5 h-5 text-indigo-500" />
+                   </div>
+                   <div className="flex-1">
+                     <h3 className="text-base font-extrabold text-indigo-900 tracking-tight">Opportunité de Fusion : {client.name} !</h3>
+                     <p className="text-indigo-600/80 text-xs font-bold mt-0.5 leading-relaxed">Le client a {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({Array.from(new Set(group.map((g: any) => g.product))).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
+                   </div>
+                </div>
+                <Link 
+                  to={`/clients/${client.id}`}
+                  className="px-6 py-2.5 bg-white text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 hover:border-transparent rounded-xl text-xs font-black shadow-sm whitespace-nowrap transition-all hover:scale-105 relative z-10"
+                >
+                  Voir le client
+                </Link>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {(filteredDossiers.length === 0 && filteredSingles.length === 0) ? (
         <div className="bg-white rounded-3xl border border-slate-200 p-16 text-center shadow-sm">
