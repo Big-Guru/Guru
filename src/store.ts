@@ -180,44 +180,57 @@ export const useStore = create<AppState>()(
 
         const initialDate = projectData.installationDate || new Date().toISOString().split('T')[0];
 
-        const initialContracts = [
-          {
-            id: uuidv4(),
-            name: "Acquisition",
-            type: "Acquisition",
-            mode: "Acquisition" as const,
-            status: "ACTIVE" as const,
-            startDate: initialDate,
-            phase: "Démarchage" as any,
-            phases: getDefaultPhases("Acquisition"),
-            tasks: [],
-            documents: {}
-          },
-          {
-            id: uuidv4(),
-            name: "Maintenance Gratuite",
-            type: "Maintenance offerte",
-            mode: "Maintenance offerte" as const,
-            status: "PENDING" as const,
-            startDate: "", // Sera défini 6 mois après Formation
-            phase: "Adaptation" as any,
-            phases: getDefaultPhases("Maintenance offerte"),
-            tasks: [],
-            documents: {}
-          },
-          {
-            id: uuidv4(),
-            name: "Maintenance Annuelle",
-            type: "Maintenance",
-            mode: "Maintenance" as const,
-            status: "PENDING" as const,
-            startDate: "", // Sera défini 1 an après Maintenance Gratuite
-            phase: "Adaptation" as any,
-            phases: getDefaultPhases("Maintenance"),
-            tasks: [],
-            documents: {}
-          }
-        ];
+        const processType = projectData.processType || 'STANDARD';
+        let initialContracts: any[] = [];
+
+        const contractAcquisition = {
+          id: uuidv4(),
+          name: "Acquisition",
+          type: "Acquisition",
+          mode: "Acquisition" as const,
+          status: "ACTIVE" as const,
+          startDate: initialDate,
+          phase: "Démarchage" as any,
+          phases: getDefaultPhases("Acquisition"),
+          tasks: [],
+          documents: {}
+        };
+
+        const contractMaintenanceGratuite = {
+          id: uuidv4(),
+          name: "Maintenance Gratuite",
+          type: "Maintenance offerte",
+          mode: "Maintenance offerte" as const,
+          status: "PENDING" as const,
+          startDate: "", // Sera défini 6 mois après Formation
+          phase: "Adaptation" as any,
+          phases: getDefaultPhases("Maintenance offerte"),
+          tasks: [],
+          documents: {}
+        };
+
+        const contractMaintenance = {
+          id: uuidv4(),
+          name: "Maintenance Annuelle",
+          type: "Maintenance",
+          mode: "Maintenance" as const,
+          status: "PENDING" as const,
+          startDate: "", // Sera défini 1 an après Maintenance Gratuite
+          phase: "Adaptation" as any,
+          phases: getDefaultPhases("Maintenance"),
+          tasks: [],
+          documents: {}
+        };
+
+        if (processType === 'MAINTENANCE_ONLY') {
+          contractMaintenance.status = 'ACTIVE';
+          contractMaintenance.startDate = initialDate;
+          initialContracts = [contractMaintenance];
+        } else if (processType === 'DIRECT_MAINTENANCE') {
+          initialContracts = [contractAcquisition, contractMaintenance];
+        } else {
+          initialContracts = [contractAcquisition, contractMaintenanceGratuite, contractMaintenance];
+        }
 
         // Format createdAt to fr-FR date string
         let formattedCreatedAt = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR');
@@ -557,6 +570,7 @@ export const useStore = create<AppState>()(
 
         let updatedContracts = [...project.contracts];
         let hasChanges = false;
+        const processType = project.processType || 'STANDARD';
         
         // Trouver la date de la tâche Formation
         const acqContract = updatedContracts.find(c => c.mode === 'Acquisition');
@@ -594,20 +608,30 @@ export const useStore = create<AppState>()(
 
         // Programmer Maintenance Annuelle
         const maintAnnuelle = updatedContracts.find(c => c.mode === 'Maintenance');
-        if (maintAnnuelle && maintAnnuelle.status === 'PENDING' && maintOfferte && maintOfferte.startDate) {
-          const maintDate = new Date(maintOfferte.startDate);
-          maintDate.setFullYear(maintDate.getFullYear() + 1);
-          const maintDateStr = maintDate.toISOString().split('T')[0];
+        if (maintAnnuelle && maintAnnuelle.status === 'PENDING') {
+          let maintDate: Date | null = null;
           
-          if (maintAnnuelle.startDate !== maintDateStr) {
-            maintAnnuelle.startDate = maintDateStr;
-            hasChanges = true;
+          if (maintOfferte && maintOfferte.startDate) {
+            maintDate = new Date(maintOfferte.startDate);
+            maintDate.setFullYear(maintDate.getFullYear() + 1);
+          } else if (processType === 'DIRECT_MAINTENANCE' && formationDoneDate) {
+            maintDate = new Date(formationDoneDate);
+            maintDate.setMonth(maintDate.getMonth() + 12);
           }
 
-          // Activer si nécessaire
-          if (new Date() >= maintDate) {
-            maintAnnuelle.status = 'ACTIVE';
-            hasChanges = true;
+          if (maintDate) {
+            const maintDateStr = maintDate.toISOString().split('T')[0];
+            
+            if (maintAnnuelle.startDate !== maintDateStr) {
+              maintAnnuelle.startDate = maintDateStr;
+              hasChanges = true;
+            }
+
+            // Activer si nécessaire
+            if (new Date() >= maintDate) {
+              maintAnnuelle.status = 'ACTIVE';
+              hasChanges = true;
+            }
           }
         }
 
@@ -643,7 +667,11 @@ export const useStore = create<AppState>()(
         // 2. Gérer les maintenances si la formation est terminée
         if (formationDoneDate) {
           const maintTargetDate = new Date(formationDoneDate);
-          maintTargetDate.setMonth(maintTargetDate.getMonth() + 18);
+          if (processType === 'DIRECT_MAINTENANCE') {
+            maintTargetDate.setMonth(maintTargetDate.getMonth() + 12);
+          } else {
+            maintTargetDate.setMonth(maintTargetDate.getMonth() + 18);
+          }
 
           // Vérifier si Maintenance 1 Encaissement existe (Year 1)
           if (!currentEncaissements.find(e => e.mode === 'Maintenance' && e.year === 1)) {

@@ -89,6 +89,7 @@ export interface Client {
 
 export type ProductType = 'PAYE' | 'BUDGET' | 'BUDGET_APC' | 'STOCKS' | 'GRH' | 'PHARMATIS' | 'GBS';
 export type ProductVersion = 'ULTRALIGHT' | 'LIGHT' | 'INTERMEDIATE' | 'ADVANCED' | 'GLOBAL';
+export type ProcessType = 'STANDARD' | 'DIRECT_MAINTENANCE' | 'MAINTENANCE_ONLY';
 
 export interface MaintenanceInfo {
   id: string;
@@ -161,6 +162,7 @@ export interface Project {
   clientId: string;
   product: string; // Made generic string for drop list flexibility
   version?: ProductVersion;
+  processType?: ProcessType;
   name: string;
   installationDate?: string; // YYYY-MM-DD
 

@@ -39,6 +39,7 @@ export default function ClientDetails() {
     departement: 'D1',
     product: 'PAYE' as ProductType,
     version: 'LIGHT' as ProductVersion,
+    processType: 'STANDARD' as ProcessType,
     wilaya: '',
     ville: '',
     entity: 'Naltis',
@@ -138,13 +139,14 @@ export default function ClientDetails() {
       ville: newProjectData.ville,
       entity: newProjectData.entity as any,
       status: newProjectData.status as any,
+      processType: newProjectData.processType as any,
       technique: newProjectData.technique,
       createdAt: newProjectData.createdAt,
       installationDate: newProjectData.createdAt
     });
     setShowNewProject(false);
     setNewProjectData({ 
-      name: '', departement: 'D1', product: 'PAYE', version: 'LIGHT', wilaya: '', ville: '', 
+      name: '', departement: 'D1', product: 'PAYE', version: 'LIGHT', processType: 'STANDARD', wilaya: '', ville: '', 
       entity: 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [],
       createdAt: new Date().toISOString().split('T')[0]
     });
@@ -732,6 +734,20 @@ export default function ClientDetails() {
                   >
                     <option value="D1">D1</option>
                     <option value="D2">D2</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Processus d'intégration</label>
+                  <select
+                    required
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                    value={newProjectData.processType}
+                    onChange={e => setNewProjectData({ ...newProjectData, processType: e.target.value as any })}
+                  >
+                    <option value="STANDARD">Standard (Acquisition ➔ M. Gratuite ➔ Maintenance)</option>
+                    <option value="DIRECT_MAINTENANCE">Sans gratuité (Acquisition ➔ Maintenance)</option>
+                    <option value="MAINTENANCE_ONLY">Full Maintenance (Maintenance uniquement)</option>
                   </select>
                 </div>
 

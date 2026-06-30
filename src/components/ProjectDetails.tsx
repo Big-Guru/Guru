@@ -965,7 +965,11 @@ export default function ProjectDetails() {
                           </span>
                           <button
                             onClick={() => {
-                              if (window.confirm("Voulez-vous vraiment activer la facturation de cette maintenance ?\n\nLa phase 'Maintenance Gratuite' sera terminée et l'encaissement passera en cours.")) {
+                              let confirmMsg = "Voulez-vous vraiment activer la facturation de cette maintenance ?";
+                              if (project.processType === 'STANDARD' && enc.year === 1) {
+                                confirmMsg += "\n\nLa phase 'Maintenance Gratuite' sera terminée et l'encaissement passera en cours.";
+                              }
+                              if (window.confirm(confirmMsg)) {
                                 activateMaintenanceEncaissement(project.id, enc.id);
                               }
                             }}
