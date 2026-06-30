@@ -217,7 +217,7 @@ export const useStore = create<AppState>()(
         const newProject: Project = {
           ...projectData,
           id,
-          ownerId: ownerId || undefined,
+          ownerId: ownerId || null,
           status: 'Actif',
           createdAt: new Date().toISOString().split('T')[0],
           contracts: initialContracts,
@@ -760,6 +760,11 @@ export const useStore = create<AppState>()(
         // Trouver la dernière
         const lastMaint = maintenances.reduce((prev, current) => ((prev.year || 1) > (current.year || 1)) ? prev : current);
         
+        const nextYear = (lastMaint.year || 1) + 1;
+        
+        // Prevent duplicate generation for the same year
+        if (maintenances.some(m => m.year === nextYear)) return;
+
         const nextTargetDate = new Date(lastMaint.targetDate);
         nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
         
@@ -767,7 +772,7 @@ export const useStore = create<AppState>()(
           id: uuidv4(),
           projectId,
           mode: 'Maintenance',
-          year: (lastMaint.year || 1) + 1,
+          year: nextYear,
           targetDate: nextTargetDate.toISOString().split('T')[0],
           status: nextTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
           proforma: { status: 'PENDING' },
@@ -831,13 +836,13 @@ export const useStore = create<AppState>()(
           return c;
         });
 
-        // Generate the new contract for the next year
         updatedContracts.push({
           id: uuidv4(),
           name: `Maintenance Année ${currentYear + 1}`,
           type: 'Standard',
           mode: 'Maintenance',
           status: 'PENDING' as const,
+          startDate: nextTargetDate.toISOString().split('T')[0],
           phases: [
             { id: uuidv4(), name: 'Encaissement', status: 'PENDING' as const, tasks: [] },
             { id: uuidv4(), name: 'Recouvrement', status: 'PENDING' as const, tasks: [] }
@@ -921,9 +926,9 @@ export const useStore = create<AppState>()(
           id,
           createdAt: new Date().toISOString()
         };
+        set((state) => ({ dossiersPaiement: [...state.dossiersPaiement, newDossier] }));
         try {
           await setDoc(doc(db, 'dossiers', id), newDossier);
-          set((state) => ({ dossiersPaiement: [...state.dossiersPaiement, newDossier] }));
           return id;
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'Création du dossier de paiement');
@@ -956,34 +961,13 @@ export const useStore = create<AppState>()(
       },
       dissociateDossier: async (dossierId) => {
         const state = get();
-        // 1. Remove from all encaissements
-        const newProjects = state.projects.map(p => {
-          if (!p.encaissements) return p;
-          let hasChanges = false;
-          const updatedEncaissements = p.encaissements.map(e => {
-            if (e.combinedWithDossierId === dossierId || e.isCombined) {
-              hasChanges = true;
-              const { isCombined, combinedWithDossierId, ...rest } = e;
-              return rest;
-            }
-            return e;
-          });
-          
-          if (hasChanges) {
-             // Let's do local update, but Firestore update is tricky without a transaction if multiple projects are involved.
-             // We'll trust the state update for UI, and sync or save explicitly if needed, but normally we should persist.
-             const { db } = require('./lib/firebase'); // using require to avoid async in loop if possible, actually we should use state.updateProject
-             // Actually state.updateProject handles firestore update!
-          }
-          return p;
-        });
         
         // Let's use updateProject to persist
         state.projects.forEach(p => {
           if (p.encaissements?.some(e => e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId)) {
              const updated = p.encaissements.map(e => {
                 if (e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId) {
-                   return { ...e, isCombined: false, combinedWithDossierId: undefined, dossierId: undefined };
+                   return { ...e, isCombined: false, combinedWithDossierId: null, dossierId: null };
                 }
                 return e;
              });

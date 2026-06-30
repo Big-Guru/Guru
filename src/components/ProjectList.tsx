@@ -427,49 +427,64 @@ export default function ProjectList() {
                     getGradientStyle(project.product)
                   )}
                 >
-                  {/* Top row: Nom + Owner Avatar */}
+                  {/* Top row: Nom */}
                   <div className="flex justify-between items-start gap-4">
                     <div className="space-y-0.5">
-                      <h4 className="font-extrabold text-lg tracking-tight leading-tight drop-shadow-sm group-hover:underline decoration-white/30 decoration-2 underline-offset-4">
-                        {project.name}
+                      <h4 className="font-extrabold text-lg tracking-tight leading-tight drop-shadow-sm group-hover:underline decoration-white/30 decoration-2 underline-offset-4 uppercase">
+                        {client?.name || project.name}
                       </h4>
-                      {client && (
-                        <p className="text-[11px] font-bold text-white/80 tracking-wide uppercase">
-                          {client.name}
-                        </p>
-                      )}
-                    </div>
-                    <img
-                      src={getOwnerAvatar(project.ownerId || project.id)}
-                      alt="Owner Avatar"
-                      className="w-10 h-10 rounded-full border-2 border-white/40 object-cover shadow-md shrink-0 bg-white/10"
-                      title="Propriétaire du projet"
-                    />
-                  </div>
-
-                  {/* Left items: Projet, Mode, Phase */}
-                  <div className="space-y-1.5 my-4 text-xs font-bold text-white/90">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] uppercase tracking-wider opacity-75">Projet:</span>
-                      <span className="bg-white/15 px-2 py-0.5 rounded-lg border border-white/10 text-[10px]">
-                        {project.product}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] uppercase tracking-wider opacity-75">Mode:</span>
-                      <span className="text-[11px]">{displayMode}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] uppercase tracking-wider opacity-75">Phase:</span>
-                      <span className="text-[11px]">{displayPhase}</span>
+                      <div className="pt-1.5">
+                        <span className="inline-block bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded border border-white/20 text-[9px] font-black tracking-widest uppercase shadow-sm">
+                          {project.product}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Bottom right: Etat */}
-                  <div className="flex justify-end items-center mt-auto">
-                    <span className="bg-white/20 backdrop-blur-md text-white border border-white/20 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm">
-                      {project.status || 'Actif'}
-                    </span>
+                  {/* Bottom Section: Active Modes & Tasks */}
+                  <div className="mt-auto pt-4 space-y-3">
+                    {project.contracts?.filter(c => c.status === 'ACTIVE').map(contract => {
+                       const activePhase = contract.phases?.find(p => p.status === 'ACTIVE') || contract.phases?.find(p => p.status === 'PENDING') || contract.phases?.[0];
+                       return (
+                         <div key={contract.id} className="flex flex-col">
+                            <div className="text-sm font-extrabold text-white">
+                              {contract.name}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[11px] font-bold text-white/80">
+                                {activePhase?.name || 'Non définie'}
+                              </span>
+                              <span className="w-1 h-1 rounded-full bg-white/40"></span>
+                              <span className="px-1.5 py-0.5 rounded-md uppercase tracking-wider text-[9px] font-black bg-white/20 text-white shadow-sm">
+                                {project.status || 'Actif'}
+                              </span>
+                            </div>
+                            {/* Petits points des tâches pour la phase active */}
+                            {activePhase?.tasks && activePhase.tasks.length > 0 && (
+                              <div className="flex gap-1 mt-2 w-full max-w-[120px]">
+                                {activePhase.tasks.map((task: any, i: number) => (
+                                  <div 
+                                    key={i} 
+                                    title={`${task.name} : ${task.status}`}
+                                    className={cn(
+                                      "flex-1 h-1 rounded-full transition-all duration-300",
+                                      task.status === 'DONE' ? 'bg-emerald-400' : 
+                                      task.status === 'IN_PROGRESS' ? 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-pulse' : 
+                                      task.status === 'CANCELED' ? 'bg-red-400' :
+                                      'bg-white/30'
+                                    )}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                         </div>
+                       );
+                    })}
+                    {(!project.contracts || project.contracts.filter(c => c.status === 'ACTIVE').length === 0) && (
+                       <div className="text-sm font-bold text-white/60 italic">
+                         Aucun mode actif
+                       </div>
+                    )}
                   </div>
                 </Link>
               );

@@ -26,10 +26,14 @@ const TECH_COLLABS = ["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"];
 
 export default function ClientDetails() {
   const { id } = useParams<{ id: string }>();
-  const { clients, projects, addProject, deleteProject, dossiersPaiement, addDossierPaiement, updateEncaissement } = useStore();
+  const { clients, projects, addProject, deleteProject, dossiersPaiement, addDossierPaiement, updateEncaissement, deleteDossierPaiement, dissociateDossier } = useStore();
+  const [showFusionModal, setShowFusionModal] = useState(false);
   const [selectedFusionGroup, setSelectedFusionGroup] = useState<any[] | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [selectedDossierFacturationId, setSelectedDossierFacturationId] = useState<string | null>(null);
+  const [isCreatingDossier, setIsCreatingDossier] = useState(false);
+  const [manualFusionSelection, setManualFusionSelection] = useState<any[]>([]);
+  const isCreatingRef = React.useRef(false);
   const [newProjectData, setNewProjectData] = useState({
     name: '',
     departement: 'D1',
@@ -73,7 +77,7 @@ export default function ClientDetails() {
   });
 
   const eligibleEncaissements = allEncaissements.filter(e => 
-    (e.status === 'IN_PROGRESS' || e.status === 'UPCOMING') && 
+    e.status === 'IN_PROGRESS' && 
     !e.isCombined
   );
 
@@ -87,6 +91,9 @@ export default function ClientDetails() {
   const combinableGroups = Object.entries(grouped).filter(([_, group]) => group.length >= 2);
 
   const handleCreateDossier = async (group: any[]) => {
+     if (isCreatingRef.current || group.length === 0) return;
+     isCreatingRef.current = true;
+     setIsCreatingDossier(true);
      try {
        const newId = await addDossierPaiement({
           clientId: client.id,
@@ -99,11 +106,21 @@ export default function ClientDetails() {
        
        if (newId) {
          group.forEach(e => {
-            updateEncaissement(e.projectId, e.id, { isCombined: true, dossierId: newId });
+            updateEncaissement(e.projectId, e.id, { isCombined: true, combinedWithDossierId: newId });
          });
        }
+       setSelectedFusionGroup(null);
+       setManualFusionSelection([]);
+       
+       // Delay releasing the lock to absorb any queued double-clicks
+       setTimeout(() => {
+         isCreatingRef.current = false;
+         setIsCreatingDossier(false);
+       }, 500);
      } catch (e) {
        console.error("Erreur lors de la création du dossier", e);
+       isCreatingRef.current = false;
+       setIsCreatingDossier(false);
      }
   };
 
@@ -326,29 +343,55 @@ export default function ClientDetails() {
                          </div>
 
                          {/* Bottom Section: Minimalist */}
-                         <div className="mt-auto pt-4 border-t border-slate-100/50">
-                           <div className="text-sm font-extrabold text-slate-800">
-                             {project.contracts?.find(c => c.status === 'ACTIVE')?.mode || project.contracts?.[0]?.mode || 'Acquisition'}
-                           </div>
-                           <div className="flex items-center gap-2 mt-1">
-                             <span className="text-xs font-bold text-slate-500">
-                               {(() => {
-                                 const activeContract = project.contracts?.find(c => c.status === 'ACTIVE') || project.contracts?.[0];
-                                 const activePhase = activeContract?.phases?.find(p => p.status === 'ACTIVE' || p.status === 'PENDING') || activeContract?.phases?.[0];
-                                 return activePhase?.name || 'Non définie';
-                               })()}
-                             </span>
-                             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                             <span className={cn(
-                               "px-1.5 py-0.5 rounded-md uppercase tracking-wider text-[9px] font-black",
-                               project.status === 'Actif' ? "bg-emerald-50 text-emerald-600" :
-                               project.status === 'Effectué' ? "bg-blue-50 text-blue-600" :
-                               project.status === 'Suspendu' ? "bg-amber-50 text-amber-600" :
-                               "bg-slate-50 text-slate-500"
-                             )}>
-                               {project.status}
-                             </span>
-                           </div>
+                         <div className="mt-auto pt-4 border-t border-slate-100/50 space-y-3">
+                           {project.contracts?.filter(c => c.status === 'ACTIVE').map(contract => {
+                              const activePhase = contract.phases?.find(p => p.status === 'ACTIVE') || contract.phases?.find(p => p.status === 'PENDING') || contract.phases?.[0];
+                              return (
+                                <div key={contract.id} className="flex flex-col">
+                                   <div className="text-sm font-extrabold text-slate-800">
+                                     {contract.name}
+                                   </div>
+                                   <div className="flex items-center gap-2 mt-0.5">
+                                     <span className="text-xs font-bold text-slate-500">
+                                       {activePhase?.name || 'Non définie'}
+                                     </span>
+                                     <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                     <span className={cn(
+                                       "px-1.5 py-0.5 rounded-md uppercase tracking-wider text-[9px] font-black",
+                                       project.status === 'Actif' ? "bg-emerald-50 text-emerald-600" :
+                                       project.status === 'Effectué' ? "bg-blue-50 text-blue-600" :
+                                       project.status === 'Suspendu' ? "bg-amber-50 text-amber-600" :
+                                       "bg-slate-50 text-slate-500"
+                                     )}>
+                                       {project.status}
+                                     </span>
+                                   </div>
+                                   {/* Petits points des tâches pour la phase active */}
+                                   {activePhase?.tasks && activePhase.tasks.length > 0 && (
+                                     <div className="flex gap-1 mt-2 w-full max-w-[120px]">
+                                       {activePhase.tasks.map((task, i) => (
+                                         <div 
+                                           key={i} 
+                                           title={`${task.name} : ${task.status}`}
+                                           className={cn(
+                                             "flex-1 h-1 rounded-full transition-all duration-300",
+                                             task.status === 'DONE' ? 'bg-emerald-400' : 
+                                             task.status === 'IN_PROGRESS' ? 'bg-blue-400 animate-pulse' : 
+                                             task.status === 'CANCELED' ? 'bg-red-400' :
+                                             'bg-slate-200'
+                                           )}
+                                         />
+                                       ))}
+                                     </div>
+                                   )}
+                                </div>
+                              );
+                           })}
+                           {(!project.contracts || project.contracts.filter(c => c.status === 'ACTIVE').length === 0) && (
+                              <div className="text-sm font-bold text-slate-500 italic">
+                                Aucun mode actif
+                              </div>
+                           )}
                          </div>
                       </div>
                     </Link>
@@ -394,6 +437,16 @@ export default function ClientDetails() {
             </h3>
             <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Vision globale de toutes les acquisitions et maintenances</p>
           </div>
+          {manualFusionSelection.length >= 2 && (
+            <button
+              disabled={isCreatingDossier}
+              onClick={() => handleCreateDossier(manualFusionSelection)}
+              className={`px-4 py-2 rounded-xl font-bold transition-colors shadow-sm flex items-center gap-2 text-sm ${isCreatingDossier ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'}`}
+            >
+              <FolderKanban className="w-4 h-4" />
+              {isCreatingDossier ? 'Création...' : "Créer Dossier d'encaissement"}
+            </button>
+          )}
         </div>
 
         {allEncaissements.length === 0 ? (
@@ -414,9 +467,26 @@ export default function ClientDetails() {
                   "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
                   isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
                   isDone ? "bg-emerald-50 border-emerald-200/60" :
-                  "bg-white border-blue-200/60 shadow-md shadow-blue-500/5"
+                  "bg-white border-blue-200/60 shadow-md shadow-blue-500/5",
+                  manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
                 )}>
                   <div className="flex items-center gap-4">
+                    {!enc.isCombined && enc.status !== 'DONE' && (
+                      <div className="pt-1">
+                        <input 
+                          type="checkbox"
+                          checked={manualFusionSelection.some(e => e.id === enc.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setManualFusionSelection([...manualFusionSelection, enc]);
+                            } else {
+                              setManualFusionSelection(manualFusionSelection.filter(item => item.id !== enc.id));
+                            }
+                          }}
+                          className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
+                        />
+                      </div>
+                    )}
                     <div className={cn(
                       "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
                       isUpcoming ? "bg-slate-200 text-slate-500" :
@@ -516,7 +586,20 @@ export default function ClientDetails() {
                       <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200">
                         Dossier Fusionné
                       </span>
-                      <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
+                        <button 
+                          onClick={() => {
+                            if (confirm("Voulez-vous vraiment supprimer ce dossier de paiement ? Les encaissements redeviendront indépendants.")) {
+                              dissociateDossier(dossier.id);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Supprimer ce dossier"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                     
                     <div className="space-y-3 mb-5">
@@ -819,14 +902,14 @@ export default function ClientDetails() {
                 Annuler
               </button>
               <button 
+                disabled={isCreatingDossier}
                 onClick={() => {
                   handleCreateDossier(selectedFusionGroup);
-                  setSelectedFusionGroup(null);
                 }}
-                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 transition-colors shadow-md flex items-center gap-2"
+                className={`px-6 py-3 rounded-xl font-bold transition-colors shadow-md flex items-center gap-2 ${isCreatingDossier ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'}`}
               >
                 <FolderKanban className="w-5 h-5" />
-                Créer le dossier d'encaissement
+                {isCreatingDossier ? 'Création en cours...' : "Créer le dossier d'encaissement"}
               </button>
             </div>
           </div>

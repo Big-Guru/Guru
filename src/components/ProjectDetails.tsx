@@ -98,29 +98,43 @@ export default function ProjectDetails() {
   // Self-healing logic for Maintenance contract
   useEffect(() => {
     if (!project || !project.encaissements || !project.contracts) return;
-    const maintEnc = project.encaissements.find(e => e.mode === 'Maintenance' && (e.status === 'IN_PROGRESS' || e.status === 'PARTIAL'));
-    const maintContract = project.contracts.find(c => c.mode === 'Maintenance');
-    
-    if (maintEnc && maintContract) {
-      let needsFix = false;
-      const updatedContracts = project.contracts.map(c => {
-        if (c.mode === 'Maintenance') {
-          if (c.status === 'PENDING' || c.startDate !== maintEnc.targetDate) {
-            needsFix = true;
-            return {
-              ...c,
-              status: 'ACTIVE' as const,
-              startDate: maintEnc.targetDate,
-              phases: c.phases.map((ph, idx) => idx === 0 ? { ...ph, status: 'ACTIVE' as const } : ph)
-            };
-          }
-        }
-        return c;
-      });
-
-      if (needsFix) {
-        updateProject(project.id, { contracts: updatedContracts });
+    let needsFix = false;
+    const updatedContracts = project.contracts.map(c => {
+      if (c.mode === 'Maintenance') {
+         const match = c.name.match(/Année (\d+)/);
+         const year = match ? parseInt(match[1], 10) : 1;
+         
+         const maintEnc = project.encaissements?.find(e => e.mode === 'Maintenance' && e.year === year);
+         
+         if (maintEnc) {
+           if (maintEnc.status === 'IN_PROGRESS' || maintEnc.status === 'PARTIAL') {
+             if (c.status === 'PENDING' || c.startDate !== maintEnc.targetDate) {
+               needsFix = true;
+               return {
+                 ...c,
+                 status: 'ACTIVE' as const,
+                 startDate: maintEnc.targetDate,
+                 phases: c.phases?.map((ph: any, idx: number) => idx === 0 ? { ...ph, status: 'ACTIVE' as const } : ph) || []
+               };
+             }
+           } else if (maintEnc.status === 'UPCOMING') {
+             if (c.status === 'ACTIVE' || c.startDate !== maintEnc.targetDate) {
+               needsFix = true;
+               return {
+                 ...c,
+                 status: 'PENDING' as const,
+                 startDate: maintEnc.targetDate,
+                 phases: c.phases?.map((ph: any) => ({ ...ph, status: 'PENDING' as const })) || []
+               };
+             }
+           }
+         }
       }
+      return c;
+    });
+
+    if (needsFix) {
+      updateProject(project.id, { contracts: updatedContracts });
     }
   }, [project, updateProject]);
 
@@ -510,7 +524,18 @@ export default function ProjectDetails() {
                                "text-[10px] font-bold uppercase tracking-wider transition-colors",
                                isActive && !isStacked ? "text-slate-500" : "text-slate-400 group-hover:text-slate-500"
                              )}>
-                               {card.startDate ? `Début: ${card.startDate}` : (isPending ? 'En attente' : 'Non défini')}
+                               {(() => {
+                                 let displayDate = card.startDate;
+                                 if (!displayDate && card.mode === 'Maintenance') {
+                                    const match = card.name.match(/Année (\d+)/);
+                                    if (match) {
+                                      const year = parseInt(match[1], 10);
+                                      const enc = project.encaissements?.find(e => e.mode === 'Maintenance' && e.year === year);
+                                      if (enc?.targetDate) displayDate = enc.targetDate;
+                                    }
+                                 }
+                                 return displayDate ? `Début: ${new Date(displayDate).toLocaleDateString('fr-FR')}` : (isPending ? 'En attente' : 'Non défini');
+                               })()}
                              </span>
                              {activePhase && activePhase.tasks && activePhase.tasks.length > 0 && (
                                <div className="flex items-center gap-1.5 flex-wrap max-w-[120px]">

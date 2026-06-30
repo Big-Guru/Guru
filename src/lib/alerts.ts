@@ -29,7 +29,6 @@ export function calculateAlerts(project: Project): Alert[] {
         }
       });
     }
-    return alerts;
   }
 
   // Missing Documents from Encaissements (New Logic)
