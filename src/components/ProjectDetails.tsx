@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store';
 import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power } from 'lucide-react';
 import { ProjectTask, Contract, ProjectContact, DocumentTrack, DocumentDraft } from '../types';
 import { generateWordDocument } from '../lib/docxGenerator';
 import { getPrice } from '../lib/pricing';
 import DocumentPreviewModal from './DocumentPreviewModal';
+import FacturationDossierModal from './FacturationDossierModal';
 import { cn } from '../lib/utils';
 
 const getOwnerAvatar = (id: string) => {
@@ -22,6 +23,8 @@ const getOwnerAvatar = (id: string) => {
 export default function ProjectDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromClientId = location.state?.fromClientId;
   const {
     projects,
     clients,
@@ -372,9 +375,9 @@ export default function ProjectDetails() {
       <div className="flex flex-col xl:flex-row gap-6 items-start w-full">
       {/* LEFT PANEL */}
       <div className="flex-1 w-full space-y-6 min-w-0">
-        <Link to="/projects" className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
+        <Link to={fromClientId ? `/clients/${fromClientId}` : "/projects"} className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
           <ArrowLeft className="w-4 h-4" />
-          Retour à la liste des projets
+          {fromClientId ? "Retour au profil client" : "Retour à la liste des projets"}
         </Link>
         {/* 1. Header Banner */}
         <div className="relative overflow-hidden bg-white rounded-[2rem] p-6 lg:p-8 border border-slate-200/60 shadow-sm flex flex-col gap-4 group">
@@ -766,7 +769,14 @@ export default function ProjectDetails() {
             activeItems.sort((a, b) => {
                 const timeA = a.date ? new Date(a.date).getTime() : 0;
                 const timeB = b.date ? new Date(b.date).getTime() : 0;
-                return timeA - timeB;
+                if (timeA !== timeB) return timeA - timeB;
+                
+                const modeA = a.type === 'DOSSIER' ? a.encaissements[0]?.mode : a.data.mode;
+                const modeB = b.type === 'DOSSIER' ? b.encaissements[0]?.mode : b.data.mode;
+                
+                if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                return 0;
             });
 
             const renderEncaissementCard = (enc: any, isStacked: boolean = false, stackIdx: number = 0, totalStacked: number = 0) => {
@@ -970,7 +980,13 @@ export default function ProjectDetails() {
                     </div>
                     
                     <div className="space-y-3 mb-5">
-                      {encs.map((enc: any, idx: number) => (
+                      {[...encs].sort((a, b) => {
+                          const modeA = a.mode;
+                          const modeB = b.mode;
+                          if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                          if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                          return 0;
+                      }).map((enc: any, idx: number) => (
                         <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
                           <div>
                             <div className="text-sm font-bold text-slate-800">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</div>
@@ -1628,7 +1644,26 @@ export default function ProjectDetails() {
       })()}
 
       {/* NEW MODAL: Facturation */}
-      {showFacturation && (
+      {showFacturation && typeof showFacturation === 'string' && dossiersPaiement.some(d => d.id === showFacturation) ? (
+        <FacturationDossierModal 
+          dossierId={showFacturation}
+          client={client}
+          encaissements={(() => {
+             let allEncs: any[] = [];
+             projects.forEach(p => {
+               p.encaissements?.forEach(e => allEncs.push({...e, projectId: p.id, projectName: p.name, product: p.product}));
+             });
+             return allEncs.filter(e => e.isCombined && (e.combinedWithDossierId === showFacturation || (e as any).dossierId === showFacturation)).sort((a, b) => {
+                 const modeA = a.mode;
+                 const modeB = b.mode;
+                 if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                 if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                 return 0;
+             });
+          })()}
+          onClose={() => setShowFacturation(false)}
+        />
+      ) : showFacturation && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-4xl max-h-[90vh] flex flex-col justify-between overflow-hidden">
             <button type="button" onClick={() => setShowFacturation(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>

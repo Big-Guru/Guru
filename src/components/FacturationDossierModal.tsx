@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Banknote, FolderKanban } from 'lucide-react';
+import { X, Banknote, FolderKanban, Trash2 } from 'lucide-react';
 import { useStore } from '../store';
 import { Client, EncaissementRecord } from '../types';
 import { cn } from '../lib/utils';
@@ -20,7 +20,8 @@ interface FacturationDossierModalProps {
 }
 
 export default function FacturationDossierModal({ dossierId, client, encaissements, onClose }: FacturationDossierModalProps) {
-  const { updateEncaissement, generateMaintenanceEncaissement, dissociateDossier, projects } = useStore();
+  const { updateEncaissement, generateMaintenanceEncaissement, dissociateDossier, removeEncaissementFromDossier, projects } = useStore();
+  
   const [previewModalConfig, setPreviewModalConfig] = useState<{ isOpen: boolean; type: 'PROFORMA' | 'FACTURE'; encaissementId?: string; draftSnapshot?: any; isReadOnly?: boolean; readOnlyStatus?: string; projectId?: string }>({
     isOpen: false,
     type: 'PROFORMA'
@@ -61,70 +62,96 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
             </div>
           ) : (
             <>
-              {/* Anciens Encaissements du Dossier */}
-              {encaissements.length > 1 && (
-                <div className="bg-slate-50 border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden mb-6">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
-                      <FolderKanban className="w-5 h-5 text-slate-400" />
-                    </div>
-                    <div>
-                      <h4 className="font-black text-slate-800 text-lg">Ancien dossier d'encaissement</h4>
-                      <p className="text-xs font-bold text-slate-500">Facturation clôturée et fusionnée</p>
-                    </div>
+              {/* Encaissements inclus dans le Dossier */}
+              <div className="bg-slate-50 border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden mb-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
+                    <FolderKanban className="w-5 h-5 text-indigo-500" />
                   </div>
-                  
-                  <div className="space-y-3 mb-6">
-                    {encaissements.slice(0, -1).map((enc, idx) => (
-                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center">
-                        <div>
-                          <p className="text-sm font-extrabold text-slate-800">{enc.projectName} - {enc.product}</p>
-                          <p className="text-xs font-bold text-slate-500 mt-1">Encaissement : <span className="text-purple-600">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span></p>
-                        </div>
-                        <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-lg text-[10px] font-black uppercase tracking-wider">Désactivé</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="bg-slate-200/50 rounded-xl p-4 text-center border border-slate-200">
-                    <p className="text-xs font-bold text-slate-600">
-                      Les éléments de facturation qui constituaient ce dossier sont désormais fermés.<br/>
-                      Ils ont été fusionnés et sont gérés par le nouvel encaissement ci-dessous.
-                    </p>
+                  <div>
+                    <h4 className="font-black text-slate-800 text-lg">Encaissements inclus</h4>
+                    <p className="text-xs font-bold text-slate-500">Liste des encaissements regroupés dans ce dossier</p>
                   </div>
                 </div>
-              )}
+                
+                <div className="space-y-3">
+                  {encaissements.map((enc, idx) => (
+                    <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center shadow-sm">
+                      <div>
+                        <p className="text-sm font-extrabold text-slate-800">{enc.projectName} - {enc.product}</p>
+                        <p className="text-xs font-bold text-slate-500 mt-1">
+                          <span className="text-indigo-600">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-3 py-1 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg text-[10px] font-black uppercase tracking-wider">Inclus</span>
+                        <button 
+                          onClick={() => {
+                             if(window.confirm("Êtes-vous sûr de vouloir retirer cet encaissement du dossier ? Il redeviendra indépendant.")) {
+                                removeEncaissementFromDossier(enc.projectId, enc.id);
+                             }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Retirer du dossier"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-              {/* Le Gestionnaire du Dossier */}
+              {/* Historique des documents (avant fusion) */}
               {(() => {
-                const enc = encaissements[encaissements.length - 1];
-                const otherNames = encaissements.slice(0, -1).map(e => `${e.mode} ${e.year ? `(Année ${e.year})` : ''} - Projet: ${e.projectName}`);
+                const allHistory = encaissements.flatMap(e => (e.documentHistory || []).map(h => ({ ...h, encaissementName: `${e.mode} ${e.year ? `(Année ${e.year})` : ''} - ${e.projectName}` })));
+                if (allHistory.length === 0) return null;
+                
+                allHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                return (
+                  <div className="bg-slate-50 border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden mb-6">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
+                        <Banknote className="w-5 h-5 text-slate-400" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-slate-800 text-lg">Historique des documents</h4>
+                        <p className="text-xs font-bold text-slate-500">Documents générés avant ou pendant la fusion</p>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {allHistory.map((history, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center shadow-sm">
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{history.documentType} - {history.action}</p>
+                            <p className="text-[10px] font-semibold text-slate-500 mt-1">{history.encaissementName}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-bold text-slate-400 mb-1">{new Date(history.date).toLocaleString('fr-FR')}</p>
+                            <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-[9px] font-bold uppercase">{history.user}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Gestion des documents pour tout le dossier */}
+              {(() => {
+                // On utilise le premier encaissement comme "base" pour la génération du document.
+                // Lors de l'update, store.ts synchronise le statut à tous les encaissements du dossier !
+                const enc = encaissements[0];
                 
                 return (
                    <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
-                      <div className="flex justify-between items-start mb-6 gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <h4 className="font-black text-slate-900 text-lg break-words">{enc.projectName} - {enc.product}</h4>
-                          </div>
-                          <span className="text-slate-500 text-xs font-bold mt-2 block">Encaissement : <span className="text-purple-600">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</span></span>
-                          <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
-                        </div>
-                        <span className={cn(
-                          "whitespace-nowrap shrink-0 mt-1 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
-                          enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 
-                          enc.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
-                        )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : enc.status === 'DONE' ? 'Terminé' : 'En Cours'}</span>
-                      </div>
-                      
                       <div className="bg-purple-50 border border-purple-200 flex flex-col items-center justify-center rounded-2xl p-6 mb-6 text-center">
                         <FolderKanban className="w-10 h-10 mb-3 text-purple-400" />
-                        <h5 className="text-sm font-extrabold mb-2 text-purple-900">Gestionnaire du Dossier Fusionné</h5>
+                        <h5 className="text-sm font-extrabold mb-2 text-purple-900">Gestion globale des documents</h5>
                         <p className="text-xs font-bold max-w-sm text-purple-700">
-                          Cet encaissement pilote la facturation globale du dossier qui inclut également :<br/>
-                          <span className="font-black block mt-2 text-purple-900">
-                            {otherNames.length > 0 ? otherNames.join(' + ') : 'Dossier fusionné'}
-                          </span>
+                          Générez la proforma, le bon de commande et la facture pour l'ensemble du dossier fusionné.<br/>
+                          Le statut sera synchronisé pour tous les encaissements inclus.
                         </p>
                       </div>
                       

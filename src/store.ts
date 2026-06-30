@@ -90,6 +90,7 @@ interface AppState {
   updateDossierPaiement: (id: string, data: Partial<DossierPaiement>) => void;
   deleteDossierPaiement: (id: string) => void;
   dissociateDossier: (dossierId: string) => void;
+  removeEncaissementFromDossier: (projectId: string, encaissementId: string) => void;
   updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
   addDocumentHistoryEvent: (projectId: string, encaissementId: string, event: Omit<DocumentHistoryEvent, 'id'>) => void;
   generateMaintenanceEncaissement: (projectId: string) => void;
@@ -958,6 +959,16 @@ export const useStore = create<AppState>()(
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'Suppression du dossier de paiement');
         }
+      },
+      removeEncaissementFromDossier: (projectId, encaissementId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.encaissements) return;
+        
+        const updatedEncaissements = project.encaissements.map(e => 
+          e.id === encaissementId ? { ...e, isCombined: false, combinedWithDossierId: null as any } : e
+        );
+        state.updateProject(projectId, { encaissements: updatedEncaissements });
       },
       dissociateDossier: async (dossierId) => {
         const state = get();

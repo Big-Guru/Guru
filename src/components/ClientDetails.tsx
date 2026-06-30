@@ -282,6 +282,7 @@ export default function ClientDetails() {
                     <Link 
                       key={`${project.id}-${index}`} 
                       to={`/projects/${project.id}`}
+                      state={{ fromClientId: id }}
                       className="group relative flex flex-col bg-white rounded-[28px] border border-slate-200/80 shadow-md shadow-slate-200/30 hover:shadow-2xl hover:shadow-blue-500/20 hover:-translate-y-1.5 hover:border-blue-300 transition-all duration-500 overflow-hidden"
                     >
                       {/* Decorative Background Elements */}
@@ -456,191 +457,226 @@ export default function ClientDetails() {
           </div>
         ) : (
           <div className="space-y-4">
-            {[...allEncaissements].sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime()).map(enc => {
-              const isUpcoming = enc.status === 'UPCOMING';
-              const isDone = enc.status === 'DONE';
-              const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
-              const isPartial = enc.status === 'PARTIAL';
+            { (() => {
+               const pastEncaissements = allEncaissements.filter(e => {
+                  if (e.status !== 'DONE' && e.status !== 'ABANDONED') return false;
+                  if (e.isCombined) {
+                      const dossierId = e.combinedWithDossierId || (e as any).dossierId;
+                      const dossier = dossiersPaiement?.find(d => d.id === dossierId);
+                      if (dossier && dossier.status !== 'CLOSED') return false;
+                  }
+                  return true;
+               });
+               const activeIndependent = allEncaissements.filter(e => !pastEncaissements.includes(e) && !e.isCombined);
+               const activeCombinedEncaissements = allEncaissements.filter(e => !pastEncaissements.includes(e) && e.isCombined);
+               
+               const clientDossiersMap = new Map();
+               activeCombinedEncaissements.forEach(e => {
+                  const dossierId = e.combinedWithDossierId || e.dossierId;
+                  if (!dossierId) return;
+                  if (!clientDossiersMap.has(dossierId)) clientDossiersMap.set(dossierId, []);
+                  clientDossiersMap.get(dossierId).push(e);
+               });
 
-              return (
-                <div key={enc.id} className={cn(
-                  "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
-                  isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
-                  isDone ? "bg-emerald-50 border-emerald-200/60" :
-                  "bg-white border-blue-200/60 shadow-md shadow-blue-500/5",
-                  manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
-                )}>
-                  <div className="flex items-center gap-4">
-                    {!enc.isCombined && enc.status !== 'DONE' && (
-                      <div className="pt-1">
-                        <input 
-                          type="checkbox"
-                          checked={manualFusionSelection.some(e => e.id === enc.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setManualFusionSelection([...manualFusionSelection, enc]);
-                            } else {
-                              setManualFusionSelection(manualFusionSelection.filter(item => item.id !== enc.id));
-                            }
-                          }}
-                          className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
-                        />
-                      </div>
-                    )}
-                    <div className={cn(
-                      "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
-                      isUpcoming ? "bg-slate-200 text-slate-500" :
-                      isDone ? "bg-emerald-100 text-emerald-600" :
-                      "bg-blue-100 text-blue-600"
-                    )}>
-                      <Calendar className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className={cn(
-                        "font-extrabold text-base mb-1",
-                        isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
-                      )}>
-                        {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} <span className="text-slate-400 font-medium ml-1">— {enc.projectName}</span>
-                      </h4>
-                      <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                        <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider">{enc.product}</span>
-                        <span>•</span>
-                        <span className={cn(
-                          isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
-                        )}>
-                          Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+               const activeItems = [];
+               activeIndependent.forEach(e => activeItems.push({ type: 'ENCAISSEMENT', data: e, date: e.targetDate }));
+               clientDossiersMap.forEach((encs, dossierId) => {
+                  const dossier = dossiersPaiement?.find(d => d.id === dossierId);
+                  if (dossier) activeItems.push({ type: 'DOSSIER', data: dossier, encaissements: encs, date: encs[0]?.targetDate });
+               });
 
-                  <div className="flex items-center gap-4 w-full md:w-auto">
-                    {enc.isCombined && (
-                      <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                        <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
-                      </span>
-                    )}
+               activeItems.sort((a, b) => {
+                   const timeA = a.date ? new Date(a.date).getTime() : 0;
+                   const timeB = b.date ? new Date(b.date).getTime() : 0;
+                   if (timeA !== timeB) return timeA - timeB;
+                   const modeA = a.type === 'DOSSIER' ? a.encaissements[0]?.mode : a.data.mode;
+                   const modeB = b.type === 'DOSSIER' ? b.encaissements[0]?.mode : b.data.mode;
+                   if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                   if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                   return 0;
+               });
 
-                    {(isDone || isPartial) && enc.montantTotal && (
-                      <div className="text-right">
-                        <div className="text-xs font-extrabold text-slate-800">
-                          {enc.montantEncaisse?.toLocaleString('fr-DZ')} DA / {enc.montantTotal.toLocaleString('fr-DZ')} DA
+               return activeItems.map((item, idx) => {
+                 if (item.type === 'DOSSIER') {
+                   const dossier = item.data;
+                   const encs = item.encaissements;
+                   
+                   encs.sort((a, b) => {
+                       const modeA = a.mode;
+                       const modeB = b.mode;
+                       if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                       if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                       return 0;
+                   });
+                   
+                   const isSelected = manualFusionSelection.some(e => e.isCombined && e.combinedWithDossierId === dossier.id);
+                   return (
+                     <div key={dossier.id} className={cn(
+                       "p-5 border rounded-2xl shadow-sm hover:shadow-md transition-shadow",
+                       isSelected ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : "bg-white border-slate-200"
+                     )}>
+                        <div className="flex justify-between items-center mb-4">
+                          <div className="flex items-center gap-3">
+                            <input 
+                              type="checkbox" 
+                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) setManualFusionSelection([...manualFusionSelection, encs[0]]);
+                                else setManualFusionSelection(manualFusionSelection.filter(item => item.combinedWithDossierId !== dossier.id));
+                              }}
+                            />
+                            <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                              <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
+                            <button 
+                              onClick={() => {
+                                if (confirm("Voulez-vous vraiment supprimer ce dossier de paiement ? Les encaissements redeviendront indépendants.")) {
+                                  dissociateDossier(dossier.id);
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Défusionner"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                        {isPartial && enc.resteDette && (
-                          <div className="text-[10px] font-bold text-red-500 mt-0.5">Dette reportée: {enc.resteDette.toLocaleString('fr-DZ')} DA</div>
-                        )}
-                      </div>
-                    )}
+                        
+                        <div className="space-y-3 mb-5">
+                          {encs.map((eenc, i) => (
+                            <div key={i} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
+                              <div>
+                                <div className="text-sm font-bold text-slate-800">{eenc.mode} {eenc.year ? `(Année ${eenc.year})` : ''} <span className="text-slate-400 font-medium ml-1">— {eenc.projectName}</span></div>
+                                <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
+                                  <span className="uppercase">{eenc.product}</span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-[10px] text-slate-400 font-medium">Début</div>
+                                <div className="text-sm font-bold text-slate-900">{new Date(eenc.targetDate).toLocaleDateString('fr-FR')}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
 
-                    {isProgress && (
-                      <Link 
-                        to={`/projects/${enc.projectId}`}
-                        className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2"
-                      >
-                        <Banknote className="w-4 h-4" /> Gérer dans le projet
-                      </Link>
-                    )}
-                    {isDone && (
-                      <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4" /> Clôturé
-                      </span>
-                    )}
-                    {isUpcoming && (
-                      <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
-                        <Clock className="w-4 h-4" /> En attente
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                        <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
+                          <button 
+                            onClick={() => setSelectedDossierFacturationId(dossier.id)}
+                            className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
+                          >
+                            <Banknote className="w-4 h-4" /> Gérer l'encaissement
+                          </button>
+                        </div>
+                     </div>
+                   );
+                 } else {
+                   const enc = item.data;
+                   const isUpcoming = enc.status === 'UPCOMING';
+                   const isDone = enc.status === 'DONE';
+                   const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
+                   const isPartial = enc.status === 'PARTIAL';
+
+                   return (
+                     <div key={enc.id} className={cn(
+                       "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
+                       isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
+                       isDone ? "bg-emerald-50 border-emerald-200/60" :
+                       "bg-white border-blue-200/60 shadow-md shadow-blue-500/5",
+                       manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
+                     )}>
+                       <div className="flex items-center gap-4">
+                         {!enc.isCombined && enc.status !== 'DONE' && (
+                           <div className="pt-1">
+                             <input 
+                               type="checkbox"
+                               checked={manualFusionSelection.some(e => e.id === enc.id)}
+                               onChange={(e) => {
+                                 if (e.target.checked) {
+                                   setManualFusionSelection([...manualFusionSelection, enc]);
+                                 } else {
+                                   setManualFusionSelection(manualFusionSelection.filter(item => item.id !== enc.id));
+                                 }
+                               }}
+                               className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
+                             />
+                           </div>
+                         )}
+                         <div className={cn(
+                           "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
+                           isUpcoming ? "bg-slate-200 text-slate-500" :
+                           isDone ? "bg-emerald-100 text-emerald-600" :
+                           "bg-blue-100 text-blue-600"
+                         )}>
+                           <Calendar className="w-5 h-5" />
+                         </div>
+                         <div>
+                           <h4 className={cn(
+                             "font-extrabold text-base mb-1",
+                             isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
+                           )}>
+                             {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} <span className="text-slate-400 font-medium ml-1">— {enc.projectName}</span>
+                           </h4>
+                           <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                             <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider">{enc.product}</span>
+                             <span>•</span>
+                             <span className={cn(
+                               isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
+                             )}>
+                               Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                             </span>
+                           </div>
+                         </div>
+                       </div>
+
+                       <div className="flex items-center gap-4 w-full md:w-auto">
+                         {enc.isCombined && (
+                           <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                             <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
+                           </span>
+                         )}
+
+                         {(isDone || isPartial) && enc.montantTotal && (
+                           <div className="text-right">
+                             <div className="text-xs font-extrabold text-slate-800">
+                               {enc.montantEncaisse?.toLocaleString('fr-DZ')} DA / {enc.montantTotal.toLocaleString('fr-DZ')} DA
+                             </div>
+                             {isPartial && enc.resteDette && (
+                               <div className="text-[10px] font-bold text-red-500 mt-0.5">Dette reportée: {enc.resteDette.toLocaleString('fr-DZ')} DA</div>
+                             )}
+                           </div>
+                         )}
+
+                         {isProgress && (
+                           <Link 
+                             to={`/projects/${enc.projectId}`}
+                             className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2"
+                           >
+                             <Banknote className="w-4 h-4" /> Gérer dans le projet
+                           </Link>
+                         )}
+                         {isDone && (
+                           <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-2">
+                             <CheckCircle2 className="w-4 h-4" /> Clôturé
+                           </span>
+                         )}
+                         {isUpcoming && (
+                           <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
+                             <Clock className="w-4 h-4" /> En attente
+                           </span>
+                         )}
+                       </div>
+                     </div>
+                   );
+                 }
+               });
+            })()}
           </div>
         )}
       </div>
-
-      {/* Dossiers de paiement (historique) */}
-      {dossiersPaiement && dossiersPaiement.filter(d => d.clientId === id).length > 0 && (
-        <div className="mt-8 space-y-4">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h3 className="font-extrabold text-xl text-slate-900 flex items-center gap-3">
-                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-8 h-8 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
-                  <FolderKanban className="w-4 h-4 text-white" />
-                </div>
-                Dossiers d'encaissement
-              </h3>
-              <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Regroupements d'encaissements en un seul dossier</p>
-            </div>
-          </div>
-          <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {dossiersPaiement.filter(d => d.clientId === id).map((dossier) => {
-                // Get all encaissements for this dossier IN THE ORDER THEY WERE ADDED
-                const dossierEncaissements = dossier.encaissementIds
-                  .map(id => allEncaissements.find(e => e.id === id))
-                  .filter(Boolean) as EnrichedEncaissement[];
-                
-                return (
-                  <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200">
-                        Dossier Fusionné
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
-                        <button 
-                          onClick={() => {
-                            if (confirm("Voulez-vous vraiment supprimer ce dossier de paiement ? Les encaissements redeviendront indépendants.")) {
-                              dissociateDossier(dossier.id);
-                            }
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Supprimer ce dossier"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-3 mb-5">
-                      {dossierEncaissements.map((enc, idx) => (
-                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
-                          <div>
-                            <div className="text-sm font-bold text-slate-800">{enc.projectName}</div>
-                            <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
-                              <span className="uppercase">{enc.product}</span>
-                              <span>•</span>
-                              <span>{enc.mode}</span>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-[10px] text-slate-400 font-medium">Début</div>
-                            <div className="text-sm font-bold text-slate-900">{new Date(enc.targetDate).toLocaleDateString('fr-FR')}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-500">
-                      <span>Statut global:</span>
-                      <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg">{dossier.status}</span>
-                    </div>
-
-                    <div className="mt-4 pt-4 border-t border-slate-100 text-right">
-                      <button 
-                        onClick={() => setSelectedDossierFacturationId(dossier.id)}
-                        className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 uppercase tracking-wide flex items-center justify-end gap-1 ml-auto"
-                      >
-                        Ouvrir le dossier <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
       {showNewProject && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -921,11 +957,13 @@ export default function ClientDetails() {
           dossierId={selectedDossierFacturationId}
           client={client}
           encaissements={(() => {
-            const dossier = dossiersPaiement.find(d => d.id === selectedDossierFacturationId);
-            if (!dossier) return [];
-            return dossier.encaissementIds
-              .map(id => allEncaissements.find(e => e.id === id))
-              .filter(Boolean) as any[];
+             return allEncaissements.filter(e => e.isCombined && (e.combinedWithDossierId === selectedDossierFacturationId || (e as any).dossierId === selectedDossierFacturationId)).sort((a, b) => {
+                 const modeA = a.mode;
+                 const modeB = b.mode;
+                 if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                 if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                 return 0;
+             });
           })()}
           onClose={() => setSelectedDossierFacturationId(null)}
         />
