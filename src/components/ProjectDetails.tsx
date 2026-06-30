@@ -40,6 +40,7 @@ export default function ProjectDetails() {
     addHistoryEvent,
     addDocumentHistoryEvent,
     addDossierPaiement,
+    updateDossierPaiement,
     dossiersPaiement
   } = useStore();
 
@@ -52,7 +53,7 @@ export default function ProjectDetails() {
   const [showNewTask, setShowNewTask] = useState(false);
   const [showEditProject, setShowEditProject] = useState(false);
   const [showContractManager, setShowContractManager] = useState(false);
-  const [showFacturation, setShowFacturation] = useState(false);
+  const [showFacturation, setShowFacturation] = useState<boolean | string>(false);
   const [selectedMergeCandidate, setSelectedMergeCandidate] = useState<string>('none');
   const [previewModalConfig, setPreviewModalConfig] = useState<{
     isOpen: boolean;
@@ -104,20 +105,47 @@ export default function ProjectDetails() {
      isCreatingRef.current = true;
      setIsCreatingDossier(true);
      try {
-       const newId = await addDossierPaiement({
-          clientId: project.clientId,
-          projectIds: Array.from(new Set(group.map(e => e.projectId || project.id))),
-          encaissementIds: group.map(e => e.id),
-          status: 'DRAFT',
-          total: 0,
-          encaisse: 0
-       });
-       
-       if (newId) {
-         group.forEach(e => {
-            updateEncaissement(e.projectId || project.id, e.id, { isCombined: true, combinedWithDossierId: newId });
+       const existingDossierId = group.find(e => e.isCombined && e.combinedWithDossierId)?.combinedWithDossierId;
+
+       if (existingDossierId) {
+         const existingDossier = dossiersPaiement.find(d => d.id === existingDossierId);
+         if (existingDossier) {
+           const currentEncIds = existingDossier.encaissementIds || [];
+           const newEncIdsToAdd = group.filter(e => !e.isCombined).map(e => e.id);
+           const mergedEncIds = Array.from(new Set([...currentEncIds, ...newEncIdsToAdd]));
+           
+           const currentProjectIds = existingDossier.projectIds || [];
+           const newProjectIdsToAdd = group.map(e => e.projectId || project.id);
+           const mergedProjectIds = Array.from(new Set([...currentProjectIds, ...newProjectIdsToAdd]));
+
+           updateDossierPaiement(existingDossierId, {
+             encaissementIds: mergedEncIds,
+             projectIds: mergedProjectIds
+           });
+           
+           group.forEach(e => {
+             if (!e.isCombined) {
+               updateEncaissement(e.projectId || project.id, e.id, { isCombined: true, combinedWithDossierId: existingDossierId });
+             }
+           });
+         }
+       } else {
+         const newId = await addDossierPaiement({
+            clientId: project.clientId,
+            projectIds: Array.from(new Set(group.map(e => e.projectId || project.id))),
+            encaissementIds: group.map(e => e.id),
+            status: 'DRAFT',
+            total: 0,
+            encaisse: 0
          });
+         
+         if (newId) {
+           group.forEach(e => {
+              updateEncaissement(e.projectId || project.id, e.id, { isCombined: true, combinedWithDossierId: newId });
+           });
+         }
        }
+       
        setManualFusionSelection([]);
        
        setTimeout(() => {
@@ -125,7 +153,7 @@ export default function ProjectDetails() {
          setIsCreatingDossier(false);
        }, 500);
      } catch (e) {
-       console.error("Erreur lors de la création du dossier", e);
+       console.error("Erreur lors de la création/fusion du dossier", e);
        isCreatingRef.current = false;
        setIsCreatingDossier(false);
      }
@@ -343,7 +371,7 @@ export default function ProjectDetails() {
     <div className="animate-fade-in pb-12 w-full max-w-7xl mx-auto flex flex-col gap-8">
       <div className="flex flex-col xl:flex-row gap-6 items-start w-full">
       {/* LEFT PANEL */}
-      <div className="flex-1 w-full space-y-6">
+      <div className="flex-1 w-full space-y-6 min-w-0">
         <Link to="/projects" className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
           <ArrowLeft className="w-4 h-4" />
           Retour à la liste des projets
@@ -460,7 +488,7 @@ export default function ProjectDetails() {
               Modes
             </h3>
           </div>
-          <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-8 px-4 scrollbar-hide relative">
+          <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-8 px-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative">
             {(() => {
               let splitIndex = -1;
               for (let i = contractsList.length - 1; i >= 0; i--) {
@@ -499,17 +527,33 @@ export default function ProjectDetails() {
                   colorClasses = isActive ? "bg-emerald-50 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-emerald-50 hover:border-emerald-200/60";
                 }
 
-                const stackedStyles = isStacked ? {
-                  position: 'absolute' as const,
-                  left: `${stackIdx * 25}px`,
-                  top: 0,
-                  zIndex: stackIdx,
-                  opacity: 1,
-                  transform: 'scale(0.95)',
-                  transformOrigin: 'left center',
-                  width: '280px',
-                  height: '190px'
-                } : {};
+                let extraStyles: React.CSSProperties = {};
+                let extraClasses = "";
+                
+                if (isStacked) {
+                  extraStyles = {
+                    position: 'absolute' as const,
+                    top: 0,
+                    zIndex: stackIdx,
+                    transformOrigin: 'left center',
+                    width: '280px',
+                    height: '190px',
+                    '--base-left': `${stackIdx * 25}px`,
+                    '--hover-left': `${stackIdx * 295}px`,
+                  } as React.CSSProperties;
+                  extraClasses = "left-[var(--base-left)] group-hover/stack:left-[var(--hover-left)] scale-[0.95] group-hover/stack:scale-100 shadow-lg grayscale-[40%] group-hover/stack:grayscale-0 hover:!z-50";
+                } else {
+                  if (pastContracts.length > 1) {
+                    const shiftAmount = (pastContracts.length - 1) * 270 - stackIdx * 275;
+                    extraStyles = {
+                      '--peer-hover-x': `${shiftAmount}px`,
+                      zIndex: 10 - stackIdx
+                    } as React.CSSProperties;
+                    extraClasses = "relative scale-100 peer-hover:!translate-x-[var(--peer-hover-x)] peer-hover:scale-[0.95] peer-hover:grayscale-[40%] peer-hover:opacity-90";
+                  } else {
+                    extraClasses = "relative scale-100";
+                  }
+                }
 
                 return (
                     <button
@@ -518,11 +562,11 @@ export default function ProjectDetails() {
                         setSelectedContractId(card.id);
                         setShowContractManager(true);
                       }}
-                      style={stackedStyles}
+                      style={extraStyles}
                       className={cn(
-                        "group shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-300 border overflow-hidden",
+                        "group shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border overflow-hidden",
                         colorClasses,
-                        isStacked ? "shadow-lg grayscale-[40%] hover:-translate-y-3 hover:scale-100 hover:grayscale-0 hover:opacity-100 hover:z-50" : "relative",
+                        extraClasses,
                         (!isStacked && isActive) ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02] grayscale-0 opacity-100" : (!isStacked) ? "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]" : "",
                         (!isStacked && isPending && !isActive) ? "grayscale opacity-70 hover:grayscale-0 hover:opacity-100" : "",
                         (!isStacked && isDone && !isActive) ? "opacity-90 grayscale-[30%] hover:grayscale-0" : ""
@@ -605,11 +649,11 @@ export default function ProjectDetails() {
               return (
                 <>
                   {pastContracts.length > 0 && (
-                    <div className="relative shrink-0" style={{ width: `${280 + (pastContracts.length - 1) * 25}px`, height: '190px' }}>
+                    <div className="relative shrink-0 group/stack peer hover:z-40 transition-all duration-500" style={{ width: `${280 + (pastContracts.length - 1) * 25}px`, height: '190px' }}>
                       {pastContracts.map((card, index) => renderCard(card, true, index, pastContracts.length))}
                     </div>
                   )}
-                  {activeContracts.map(card => renderCard(card))}
+                  {activeContracts.map((card, idx) => renderCard(card, false, idx))}
                 </>
               );
             })()}
@@ -618,7 +662,7 @@ export default function ProjectDetails() {
         </div>
 
         {/* Panneau droit : Historique */}
-        <div className="w-full xl:w-80 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+        <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1 z-50">
           <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
             <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-indigo-600 block shadow-sm" />
@@ -639,7 +683,7 @@ export default function ProjectDetails() {
       </div>
 
       <div className="flex flex-col xl:flex-row gap-6 items-start w-full mt-2">
-        <div className="flex-1 w-full space-y-4">
+        <div className="flex-1 w-full space-y-4 min-w-0">
           {/* Liste des Encaissements */}
         <div className="mt-8 space-y-4">
           <div className="flex justify-between items-center mb-6">
@@ -680,8 +724,17 @@ export default function ProjectDetails() {
                return 0;
             });
             
-            const pastEncaissements = sortedEncaissements.filter(e => e.status === 'DONE' || e.status === 'ABANDONED');
-            
+            const pastEncaissements = sortedEncaissements.filter(e => {
+                if (e.status !== 'DONE' && e.status !== 'ABANDONED') return false;
+                if (e.isCombined) {
+                    const dossierId = e.combinedWithDossierId || e.dossierId;
+                    const dossier = dossiersPaiement.find(d => d.id === dossierId);
+                    if (dossier && dossier.status !== 'CLOSED') {
+                        return false;
+                    }
+                }
+                return true;
+            });
             const activeIndependent = sortedEncaissements.filter(e => 
                !pastEncaissements.includes(e) && !e.isCombined
             );
@@ -769,7 +822,7 @@ export default function ProjectDetails() {
                     manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
                   )}>
                     <div className="flex items-center gap-4">
-                      {!isStacked && !enc.isCombined && isProgress && (
+                      {!isStacked && isProgress && (
                         <div className="pt-1">
                           <input 
                             type="checkbox" 
@@ -842,7 +895,7 @@ export default function ProjectDetails() {
 
                       {isProgress && !isStacked && (
                         <button 
-                          onClick={() => setShowFacturation(true)}
+                          onClick={() => setShowFacturation(enc.combinedWithDossierId || enc.id)}
                           className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
                         >
                           <Banknote className="w-4 h-4" /> Gérer l'encaissement
@@ -876,12 +929,30 @@ export default function ProjectDetails() {
             };
 
             const renderDossierCard = (dossier: any, encs: any[]) => {
+                const isSelected = manualFusionSelection.some(e => e.isCombined && e.combinedWithDossierId === dossier.id);
                 return (
-                  <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                  <div key={dossier.id} className={cn(
+                    "p-5 border rounded-2xl shadow-sm hover:shadow-md transition-shadow",
+                    isSelected ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : "bg-white border-slate-200"
+                  )}>
                     <div className="flex justify-between items-center mb-4">
-                      <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                        <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setManualFusionSelection([...manualFusionSelection, encs[0]]);
+                            } else {
+                              setManualFusionSelection(manualFusionSelection.filter(item => item.combinedWithDossierId !== dossier.id));
+                            }
+                          }}
+                        />
+                        <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                          <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
                         <button 
@@ -917,7 +988,7 @@ export default function ProjectDetails() {
 
                     <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
                       <button 
-                        onClick={() => setShowFacturation(true)}
+                        onClick={() => setShowFacturation(dossier.id)}
                         className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
                       >
                         <Banknote className="w-4 h-4" /> Gérer l'encaissement
@@ -951,7 +1022,7 @@ export default function ProjectDetails() {
         </div>
 
         {/* Panneau droit : Historique des Documents */}
-        <div className="w-full xl:w-80 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+        <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
           <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
             <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-blue-600 block shadow-sm" />
@@ -1575,73 +1646,14 @@ export default function ProjectDetails() {
                   <Banknote className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                   <p className="text-slate-500 text-sm font-bold">Aucun encaissement en cours ou en attente d'action.</p>
                 </div>
-              ) : (
-                project.encaissements.filter(e => e.status === 'IN_PROGRESS' || e.status === 'PARTIAL').map(enc => {
-                  let isDossierManager = false;
-                  let otherNames: string[] = [];
-                  if (enc.isCombined) {
-                     const dossierId = enc.combinedWithDossierId || (enc as any).dossierId;
-                     const dossier = dossiersPaiement.find(d => d.id === dossierId);
-                     if (dossier) {
-                       isDossierManager = dossier.encaissementIds[dossier.encaissementIds.length - 1] === enc.id;
-                       projects.forEach(p => {
-                         p.encaissements?.forEach(e => {
-                           if (e.id !== enc.id && dossier.encaissementIds.includes(e.id)) {
-                             otherNames.push(`${e.mode} ${e.year ? `(Année ${e.year})` : ''} - Projet: ${p.name}`);
-                           }
-                         });
-                       });
-                     }
-                  }
-
-                  return (
-                   <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</h4>
-                            {enc.isCombined && (
-                              <button
-                                onClick={() => {
-                                  if(window.confirm("Êtes-vous sûr de vouloir dissocier ce dossier ? Les encaissements redeviendront indépendants.")) {
-                                    dissociateDossier(enc.combinedWithDossierId || (enc as any).dossierId);
-                                  }
-                                }}
-                                className="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors"
-                              >
-                                Dissocier le dossier
-                              </button>
-                            )}
-                          </div>
-                          <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
-                        </div>
-                        <span className={cn(
-                          "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
-                          enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                        )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
-                      </div>
-                      
-                      {enc.isCombined && (
-                        <div className={cn(
-                          "flex flex-col items-center justify-center border rounded-2xl p-6 mb-6 text-center",
-                          isDossierManager ? "bg-purple-50 border-purple-200" : "bg-slate-50 border-slate-200 p-8"
-                        )}>
-                          <FolderKanban className={cn("w-10 h-10 mb-3", isDossierManager ? "text-purple-400" : "text-slate-300")} />
-                          <h5 className={cn("text-sm font-extrabold mb-2", isDossierManager ? "text-purple-900" : "text-slate-800")}>
-                            {isDossierManager ? "Gestionnaire du Dossier Fusionné" : "Encaissement Fusionné (Désactivé)"}
-                          </h5>
-                          <p className={cn("text-xs font-bold max-w-sm", isDossierManager ? "text-purple-700" : "text-slate-500")}>
-                            {isDossierManager 
-                              ? "Cet encaissement pilote la facturation globale du dossier qui inclut également :" 
-                              : "Cette facturation est désormais incluse dans un dossier géré par un autre encaissement :"}<br/>
-                            <span className={cn("font-black block mt-2", isDossierManager ? "text-purple-900" : "text-purple-600")}>
-                              {otherNames.length > 0 ? otherNames.join(' + ') : 'Dossier fusionné'}
-                            </span>
-                          </p>
-                        </div>
-                      )}
-                      
-                      {(!enc.isCombined || isDossierManager) && (
+              ) : (() => {
+                 const activeEncs = project.encaissements!.filter(e => e.status === 'IN_PROGRESS' || e.status === 'PARTIAL');
+                 const uncombinedEncs = activeEncs.filter(e => !e.isCombined && (showFacturation === true || showFacturation === e.id));
+                 const combinedEncs = activeEncs.filter(e => e.isCombined);
+                 const activeDossierIds = Array.from(new Set(combinedEncs.map(e => e.combinedWithDossierId || (e as any).dossierId)))
+                   .filter(id => showFacturation === true || showFacturation === id);
+                 
+                 const renderDocManagement = (enc: any) => (
                         <div className="flex flex-col gap-3 mb-6">
                           {/* 1. PROFORMA */}
                         <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
@@ -1789,18 +1801,130 @@ export default function ProjectDetails() {
                           </div>
                         </div>
                       </div>
-                      )}
-                      
-                      {!enc.isCombined && enc.resteDette ? (
-                        <div className="bg-red-50 text-red-700 text-xs font-bold p-3 rounded-xl border border-red-100 flex items-center justify-between">
-                          <span>Dette générée reportée à l'année suivante :</span>
-                          <span>{enc.resteDette.toLocaleString()} DA</span>
+                 );
+
+                 return (
+                   <div className="space-y-6">
+                     {/* 1. DOSSIERS */}
+                     {activeDossierIds.map(dossierId => {
+                        const dossier = dossiersPaiement.find(d => d.id === dossierId);
+                        if (!dossier) return null;
+                        
+                        const dossierEncs = project.encaissements!.filter(e => (e.combinedWithDossierId || (e as any).dossierId) === dossierId);
+                        if (dossierEncs.length === 0) return null;
+                        
+                        dossierEncs.sort((a, b) => {
+                          if (a.mode === 'Acquisition' && b.mode !== 'Acquisition') return -1;
+                          if (b.mode === 'Acquisition' && a.mode !== 'Acquisition') return 1;
+                          return new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime();
+                        });
+                        const enc = dossierEncs[0];
+                        
+                        const historyNotes: string[] = [];
+                        dossierEncs.forEach(e => {
+                           if (e.id === enc.id) return;
+                           const name = `${e.mode} ${e.year ? `(Année ${e.year})` : ''}`;
+                           if (e.facture.status !== 'PENDING') historyNotes.push(`Facture (${e.facture.status}) générée pour ${name}`);
+                           else if (e.bc.status !== 'PENDING') historyNotes.push(`BC (${e.bc.status}) récupéré pour ${name}`);
+                           else if (e.proforma.status !== 'PENDING') historyNotes.push(`Proforma (${e.proforma.status}) générée pour ${name}`);
+                        });
+                        
+                        const allNames = dossierEncs.map(e => `${e.mode} ${e.year ? `(Année ${e.year})` : ''}`);
+
+                        return (
+                          <div key={`dossier-${dossier.id}`} className="bg-white border border-purple-200 shadow-sm rounded-2xl p-6 relative overflow-hidden ring-1 ring-purple-100">
+                             <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-500"></div>
+                             <div className="flex justify-between items-start mb-6">
+                               <div>
+                                 <div className="flex items-center gap-3 mb-2">
+                                   <div className="p-2 bg-purple-100 text-purple-600 rounded-xl">
+                                     <FolderKanban className="w-5 h-5" />
+                                   </div>
+                                   <h4 className="font-black text-purple-900 text-lg">Dossier Fusionné</h4>
+                                   <button
+                                     onClick={() => {
+                                       if(window.confirm("Êtes-vous sûr de vouloir dissocier ce dossier ? Les encaissements redeviendront indépendants.")) {
+                                         dissociateDossier(dossier.id);
+                                       }
+                                     }}
+                                     className="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors ml-2"
+                                   >
+                                     Dissocier
+                                   </button>
+                                 </div>
+                                 <div className="pl-11">
+                                   <p className="text-sm font-bold text-slate-700 flex flex-wrap gap-2 items-center">
+                                     Inclus :
+                                     {allNames.map((n, i) => (
+                                       <span key={i} className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-xs">{n}</span>
+                                     ))}
+                                   </p>
+                                   <p className="text-xs text-slate-400 font-medium mt-2">
+                                     Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}
+                                   </p>
+                                 </div>
+                               </div>
+                               <span className={cn(
+                                 "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest shrink-0 mt-2",
+                                 enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                               )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
+                             </div>
+
+                             {historyNotes.length > 0 && (
+                               <div className="mb-6 pl-11">
+                                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                                   <h5 className="text-xs font-black text-amber-800 mb-2 uppercase tracking-wider flex items-center gap-2">
+                                     <Clock className="w-3.5 h-3.5" />
+                                     Historique avant fusion
+                                   </h5>
+                                   <ul className="space-y-1.5">
+                                     {historyNotes.map((note, i) => (
+                                       <li key={i} className="text-xs font-bold text-amber-700 flex items-center gap-2">
+                                         <div className="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
+                                         {note}
+                                       </li>
+                                     ))}
+                                   </ul>
+                                 </div>
+                               </div>
+                             )}
+
+                             <div className="pl-11">
+                               {renderDocManagement(enc)}
+                             </div>
+                          </div>
+                        );
+                     })}
+
+                     {/* 2. ENCAISSEMENTS NON COMBINÉS */}
+                     {uncombinedEncs.map(enc => (
+                        <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
+                          <div className="flex justify-between items-center mb-6">
+                            <div>
+                              <div className="flex items-center gap-3">
+                                <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</h4>
+                              </div>
+                              <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+                            </div>
+                            <span className={cn(
+                              "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
+                              enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                            )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
+                          </div>
+                          
+                          {renderDocManagement(enc)}
+                          
+                          {enc.resteDette ? (
+                            <div className="bg-red-50 text-red-700 text-xs font-bold p-3 rounded-xl border border-red-100 flex items-center justify-between mt-6">
+                              <span>Dette générée reportée à l'année suivante :</span>
+                              <span>{enc.resteDette.toLocaleString()} DA</span>
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
-                  </div>
-                );
-              })
-              )}
+                     ))}
+                   </div>
+                 );
+              })()}
             </div>
             
             <div className="flex justify-end pt-6 mt-4 border-t border-slate-100 gap-3">
@@ -1872,6 +1996,7 @@ export default function ProjectDetails() {
           const dossierId = enc.combinedWithDossierId || (enc as any).dossierId;
           if (enc.isCombined && dossierId) {
              encaissementsToCombine = projects.flatMap(p => p.encaissements || []).filter(e => e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId) || [enc];
+             encaissementsToCombine.sort((a, b) => a.id === enc.id ? -1 : b.id === enc.id ? 1 : 0);
           }
 
           let totalHT = 0;
