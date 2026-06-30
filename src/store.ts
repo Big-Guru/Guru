@@ -8,7 +8,7 @@ import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 // Helper to create an empty document tracking object
 export const createEmptyDoc = () => ({ status: 'MISSING' as const });
 
-export const getDefaultPhases = (mode: string): Phase[] => {
+export const getDefaultPhases = (mode: string, annexeName?: string): Phase[] => {
   const getTasks = (phase: string): ProjectTask[] => {
     const tasks: ProjectTask[] = [];
     const add = (name: string) => tasks.push({ id: uuidv4(), name, date: '', status: 'PENDING' });
@@ -49,6 +49,17 @@ export const getDefaultPhases = (mode: string): Phase[] => {
       { id: uuidv4(), name: 'Encaissement', status: 'ACTIVE', tasks: getTasks('Encaissement') },
       { id: uuidv4(), name: 'Recouvrement', status: 'PENDING', tasks: getTasks('Recouvrement') },
     ];
+  } else if (mode === 'Annexe') {
+    return [
+      { 
+        id: uuidv4(), 
+        name: 'Adaptation', 
+        status: 'ACTIVE', 
+        tasks: [{ id: uuidv4(), name: annexeName || 'Prestation', date: '', status: 'PENDING' }] 
+      },
+      { id: uuidv4(), name: 'Encaissement', status: 'PENDING', tasks: getTasks('Encaissement') },
+      { id: uuidv4(), name: 'Recouvrement', status: 'PENDING', tasks: getTasks('Recouvrement') },
+    ];
   }
   return [];
 };
@@ -67,6 +78,8 @@ interface AppState {
   updateProject: (id: string, data: Partial<Project>) => void;
   deleteProject: (id: string) => void;
   addContract: (projectId: string, contract: { name: string; type: string }) => void;
+  addAnnexeContract: (projectId: string, annexeName: string, attachedToContractId?: string, annexePrice?: number) => void;
+  deleteAnnexeContract: (projectId: string, contractId: string) => void;
   updateContractStatus: (projectId: string, contractId: string, status: 'ACTIVE' | 'CLOSED') => void;
   togglePhaseStatus: (projectId: string, contractId: string, phaseId: string) => void;
   addTaskToContract: (projectId: string, contractId: string, phaseId: string, task: Omit<ProjectTask, 'id'>) => void;
@@ -296,6 +309,74 @@ export const useStore = create<AppState>()(
         ];
 
         state.updateProject(projectId, { contracts, history: newHistory });
+      },
+      addAnnexeContract: (projectId, annexeName, attachedToContractId, annexePrice) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project) return;
+
+        const newContract = {
+          id: uuidv4(),
+          name: annexeName,
+          type: 'Annexe',
+          attachedToContractId,
+          mode: 'Annexe' as any,
+          status: 'ACTIVE' as const,
+          startDate: new Date().toISOString().split('T')[0],
+          phases: getDefaultPhases('Annexe', annexeName),
+          tasks: [],
+          documents: {}
+        };
+        const contracts = [...(project.contracts || []), newContract];
+
+        const newEncaissement: EncaissementRecord = {
+          id: uuidv4(),
+          projectId,
+          mode: 'Annexe',
+          annexeName,
+          annexePrice,
+          targetDate: new Date().toISOString().split('T')[0],
+          status: 'IN_PROGRESS',
+          proforma: { status: 'PENDING' },
+          bc: { status: 'PENDING' },
+          facture: { status: 'PENDING' }
+        };
+        const encaissements = [...(project.encaissements || []), newEncaissement];
+
+        const newHistory = [
+          ...(project.history || []),
+          {
+            id: uuidv4(),
+            date: new Date().toLocaleDateString('fr-FR'),
+            message: `Prestation annexe ajoutée : ${annexeName}`
+          }
+        ];
+
+        state.updateProject(projectId, { contracts, encaissements, history: newHistory });
+      },
+      deleteAnnexeContract: (projectId, contractId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.contracts) return;
+
+        const contractToDelete = project.contracts.find(c => c.id === contractId);
+        if (!contractToDelete || contractToDelete.mode !== 'Annexe') return;
+
+        const contracts = project.contracts.filter(c => c.id !== contractId);
+        // Delete the associated encaissement (which has the same annexeName or is tied logically, but since they are created at the same time and we don't store contractId in encaissement... wait, they might have the same `annexeName`)
+        // It's safer to filter encaissements by mode === 'Annexe' AND annexeName === contractToDelete.name
+        const encaissements = (project.encaissements || []).filter(e => !(e.mode === 'Annexe' && e.annexeName === contractToDelete.name));
+
+        const newHistory = [
+          ...(project.history || []),
+          {
+            id: uuidv4(),
+            date: new Date().toLocaleDateString('fr-FR'),
+            message: `Prestation annexe supprimée : ${contractToDelete.name}`
+          }
+        ];
+
+        state.updateProject(projectId, { contracts, encaissements, history: newHistory });
       },
       togglePhaseStatus: (projectId, contractId, phaseId) => {
         const state = get();

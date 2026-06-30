@@ -42,7 +42,9 @@ export interface DocumentHistoryEvent {
 export interface EncaissementRecord {
   id: string;
   projectId: string;
-  mode: 'Acquisition' | 'Maintenance';
+  mode: 'Acquisition' | 'Maintenance' | 'Annexe';
+  annexeName?: string;
+  annexePrice?: number;
   year?: number; // Seulement pour la Maintenance
   targetDate: string; // YYYY-MM-DD
   status: 'UPCOMING' | 'IN_PROGRESS' | 'DONE' | 'PARTIAL';
@@ -107,7 +109,7 @@ export interface ProjectTask {
   reports?: string; // Report description / comment / files
 }
 
-export type CardMode = 'Acquisition' | 'Maintenance offerte' | 'Maintenance';
+export type CardMode = 'Acquisition' | 'Maintenance offerte' | 'Maintenance' | 'Annexe';
 export type CardPhase = 'Démarchage' | 'Adaptation' | 'Encaissement' | 'Recouvrement';
 export type CardStatus = 'ACTIVE' | 'DONE' | 'SUSPENDED' | 'ABANDONED' | 'PENDING';
 
@@ -123,6 +125,7 @@ export interface Contract {
   id: string;
   name: string;
   type: string;
+  attachedToContractId?: string;
   mode?: CardMode;
   status: CardStatus | 'CLOSED'; // Keep CLOSED for backward compatibility
   startDate?: string;
@@ -167,7 +170,7 @@ export interface Project {
   ville?: string;
   entity?: 'Naltis' | 'Netsprint' | 'MP';
   technique?: string[]; // Collaborators list
-  mode?: 'Acquisition' | 'Maintenance offerte' | 'Maintenance';
+  mode?: 'Acquisition' | 'Maintenance offerte' | 'Maintenance' | 'Annexe';
   phase?: 'Démarchage' | 'Adaptation' | 'Encaissement' | 'Recouvrement';
   status?: 'Actif' | 'Effectué' | 'Suspendu' | 'Abandonné';
   createdAt?: string;

@@ -526,9 +526,16 @@ export default function ClientDetails() {
                                 else setManualFusionSelection(manualFusionSelection.filter(item => item.combinedWithDossierId !== dossier.id));
                               }}
                             />
-                            <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                              <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
-                            </span>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                                <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
+                              </span>
+                              {Array.from(new Set(encs.map(e => e.projectName))).map((pName, idx) => (
+                                <span key={idx} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 shadow-sm">
+                                  {pName}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>

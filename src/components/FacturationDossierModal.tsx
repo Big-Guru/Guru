@@ -331,6 +331,15 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
          if (!draft || !draft.items || draft.items.length === 0) {
             let totalHT = 0;
             const items = encaissements.map(e => {
+               if (e.mode === 'Annexe') {
+                 const price = e.annexePrice || 0;
+                 totalHT += price;
+                 return {
+                   description: e.annexeName || 'Prestation Annexe',
+                   price
+                 };
+               }
+
                const p = projects.find(pr => pr.id === e.projectId);
                const prod = p?.product || e.product; // Fallback to e.product if not found
                const vers = p?.version;

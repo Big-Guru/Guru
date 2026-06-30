@@ -31,6 +31,8 @@ export default function ProjectDetails() {
     updateProject,
     deleteProject,
     addContract,
+    addAnnexeContract,
+    deleteAnnexeContract,
     updateContractStatus,
     updateTaskInContract,
     togglePhaseStatus,
@@ -209,6 +211,11 @@ export default function ProjectDetails() {
   const [newContractMode, setNewContractMode] = useState('Acquisition');
   const [newContractPhase, setNewContractPhase] = useState('Démarchage');
 
+  const [showNewAnnexeModal, setShowNewAnnexeModal] = useState(false);
+  const [newAnnexeName, setNewAnnexeName] = useState('');
+  const [newAnnexePrice, setNewAnnexePrice] = useState('');
+  const [newAnnexeAttachedContractId, setNewAnnexeAttachedContractId] = useState('');
+
   const [newTaskName, setNewTaskName] = useState('');
   const [newTaskDate, setNewTaskDate] = useState('');
   const [newTaskStatus, setNewTaskStatus] = useState<'PENDING' | 'IN_PROGRESS' | 'DONE' | 'CANCELED'>('PENDING');
@@ -239,6 +246,21 @@ export default function ProjectDetails() {
   if (!project || !client) return <div className="p-8">Projet introuvable</div>;
 
   let contractsList = [...(project.contracts || [])];
+
+  const sortedContracts: any[] = [];
+  const parentContracts = contractsList.filter(c => !c.attachedToContractId);
+  const annexes = contractsList.filter(c => c.attachedToContractId);
+
+  parentContracts.forEach(parent => {
+    sortedContracts.push(parent);
+    const attachedAnnexes = annexes.filter(a => a.attachedToContractId === parent.id);
+    sortedContracts.push(...attachedAnnexes);
+  });
+
+  const orphanedAnnexes = annexes.filter(a => !parentContracts.some(p => p.id === a.attachedToContractId));
+  sortedContracts.push(...orphanedAnnexes);
+
+  contractsList = sortedContracts;
   const contactsList = project.contacts || [];
   const historyList = project.history || [];
   const currentContract = contractsList.find(c => c.id === selectedContractId) || contractsList.find(c => c.status !== 'DONE') || contractsList[0];
@@ -490,6 +512,10 @@ export default function ProjectDetails() {
             <h3 className="font-extrabold text-xl text-slate-900">
               Modes
             </h3>
+            <button onClick={() => setShowNewAnnexeModal(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-colors shadow-sm">
+              <Plus className="w-4 h-4" />
+              Prestation Annexe
+            </button>
           </div>
           <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-8 px-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative">
             {(() => {
@@ -887,9 +913,25 @@ export default function ProjectDetails() {
                         </span>
                       )}
                       {enc.isCombined && (
-                        <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm whitespace-nowrap">
-                          <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm whitespace-nowrap">
+                            <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
+                          </span>
+                          {(() => {
+                            const dossierId = enc.combinedWithDossierId || (enc as any).dossierId;
+                            const dossier = dossiersPaiement.find(d => d.id === dossierId);
+                            if (!dossier || !dossier.projectIds) return null;
+                            return dossier.projectIds.map((pid: string, idx: number) => {
+                              const pName = projects.find(proj => proj.id === pid)?.name;
+                              if (!pName || pName === project.name) return null;
+                              return (
+                                <span key={idx} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 shadow-sm whitespace-nowrap">
+                                  + {pName}
+                                </span>
+                              );
+                            });
+                          })()}
+                        </div>
                       )}
 
                       {(isDone || isPartial) && enc.montantTotal && (
@@ -959,9 +1001,20 @@ export default function ProjectDetails() {
                             }
                           }}
                         />
-                        <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                          <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
-                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                            <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
+                          </span>
+                          {dossier.projectIds && dossier.projectIds.map((pid: string, idx: number) => {
+                            const pName = projects.find(proj => proj.id === pid)?.name;
+                            if (!pName) return null;
+                            return (
+                              <span key={idx} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 shadow-sm">
+                                {pName}
+                              </span>
+                            );
+                          })}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
@@ -980,26 +1033,33 @@ export default function ProjectDetails() {
                     </div>
                     
                     <div className="space-y-3 mb-5">
-                      {[...encs].sort((a, b) => {
-                          const modeA = a.mode;
-                          const modeB = b.mode;
-                          if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
-                          if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
-                          return 0;
-                      }).map((enc: any, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
-                          <div>
-                            <div className="text-sm font-bold text-slate-800">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</div>
-                            <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
-                              <span className="uppercase">{project.product} {project.version}</span>
+                      {(() => {
+                        const dossierAllEncs = projects.flatMap(p => 
+                          (p.encaissements || []).filter(e => e.combinedWithDossierId === dossier.id || (e as any).dossierId === dossier.id)
+                            .map(e => ({ ...e, projectName: p.name, product: p.product, version: p.version }))
+                        );
+
+                        return dossierAllEncs.sort((a: any, b: any) => {
+                            const modeA = a.mode;
+                            const modeB = b.mode;
+                            if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                            if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                            return 0;
+                        }).map((enc: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
+                            <div>
+                              <div className="text-sm font-bold text-slate-800">{enc.mode} {enc.year ? `(Année ${enc.year})` : enc.annexeName ? `(${enc.annexeName})` : ''} <span className="text-slate-400 font-medium ml-1">— {enc.projectName}</span></div>
+                              <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
+                                <span className="uppercase">{enc.product} {enc.version}</span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[10px] text-slate-400 font-medium">Début</div>
+                              <div className="text-sm font-bold text-slate-900">{new Date(enc.targetDate).toLocaleDateString('fr-FR')}</div>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-[10px] text-slate-400 font-medium">Début</div>
-                            <div className="text-sm font-bold text-slate-900">{new Date(enc.targetDate).toLocaleDateString('fr-FR')}</div>
-                          </div>
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
 
                     <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
@@ -1129,6 +1189,21 @@ export default function ProjectDetails() {
                       <option value="PENDING">En attente</option>
                     </select>
                   </div>
+                  {currentContract.mode === 'Annexe' && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm('Voulez-vous vraiment supprimer cette prestation annexe et son encaissement ?')) {
+                          deleteAnnexeContract(project.id, currentContract.id);
+                          setShowContractManager(false);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors ml-2"
+                      title="Supprimer la prestation annexe"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Supprimer
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1461,6 +1536,67 @@ export default function ProjectDetails() {
         </div>
       )}
 
+      {/* Add New Annexe */}
+      {showNewAnnexeModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (newAnnexeName.trim() && newAnnexePrice !== '') {
+              addAnnexeContract(project.id, newAnnexeName.trim(), newAnnexeAttachedContractId || undefined, parseFloat(newAnnexePrice));
+              setNewAnnexeName('');
+              setNewAnnexePrice('');
+              setNewAnnexeAttachedContractId('');
+              setShowNewAnnexeModal(false);
+            }
+          }} className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-md">
+            <button type="button" onClick={() => setShowNewAnnexeModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
+            <h3 className="font-extrabold text-slate-900 text-base mb-5">Ajouter une prestation annexe</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Nom de la prestation</label>
+                <input 
+                  type="text" 
+                  value={newAnnexeName}
+                  onChange={e => setNewAnnexeName(e.target.value)}
+                  placeholder="Ex: Matériel Serveur, Formation..."
+                  required
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Attacher au contrat (Optionnel)</label>
+                <select
+                  value={newAnnexeAttachedContractId}
+                  onChange={e => setNewAnnexeAttachedContractId(e.target.value)}
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
+                >
+                  <option value="">-- Aucun contrat (Indépendant) --</option>
+                  {project.contracts?.filter(c => c.status !== 'DONE' && c.status !== 'ABANDONED' && c.mode !== 'Annexe').map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Prix HT (DA)</label>
+                <input 
+                  type="number" 
+                  value={newAnnexePrice}
+                  onChange={e => setNewAnnexePrice(e.target.value)}
+                  placeholder="Ex: 50000"
+                  required
+                  min="0"
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-6 mt-4 border-t border-slate-100">
+              <button type="button" onClick={() => setShowNewAnnexeModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Annuler</button>
+              <button type="submit" className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md">Ajouter</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Add New Contract */}
       {showNewContract && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1690,6 +1826,18 @@ export default function ProjectDetails() {
                  
                  const renderDocManagement = (enc: any) => (
                         <div className="flex flex-col gap-3 mb-6">
+                          {enc.mode === 'Annexe' && (
+                            <div className="bg-indigo-50/50 p-3.5 rounded-xl border border-indigo-100 flex items-center gap-3">
+                              <label className="text-xs font-bold text-indigo-700 whitespace-nowrap">Désignation (Facture) :</label>
+                              <input 
+                                type="text" 
+                                value={enc.annexeName || ''}
+                                onChange={e => updateEncaissement(project.id, enc.id, { annexeName: e.target.value })}
+                                placeholder="Désignation sur la proforma/facture"
+                                className="flex-1 text-xs font-bold text-slate-700 bg-white border border-indigo-200 rounded-lg px-3 py-2 outline-none focus:border-indigo-500 transition-colors"
+                              />
+                            </div>
+                          )}
                           {/* 1. PROFORMA */}
                         <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
                           <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
@@ -1858,13 +2006,13 @@ export default function ProjectDetails() {
                         const historyNotes: string[] = [];
                         dossierEncs.forEach(e => {
                            if (e.id === enc.id) return;
-                           const name = `${e.mode} ${e.year ? `(Année ${e.year})` : ''}`;
+                           const name = `${e.mode} ${e.year ? `(Année ${e.year})` : e.annexeName ? `(${e.annexeName})` : ''}`;
                            if (e.facture.status !== 'PENDING') historyNotes.push(`Facture (${e.facture.status}) générée pour ${name}`);
                            else if (e.bc.status !== 'PENDING') historyNotes.push(`BC (${e.bc.status}) récupéré pour ${name}`);
                            else if (e.proforma.status !== 'PENDING') historyNotes.push(`Proforma (${e.proforma.status}) générée pour ${name}`);
                         });
                         
-                        const allNames = dossierEncs.map(e => `${e.mode} ${e.year ? `(Année ${e.year})` : ''}`);
+                        const allNames = dossierEncs.map(e => `${e.mode} ${e.year ? `(Année ${e.year})` : e.annexeName ? `(${e.annexeName})` : ''}`);
 
                         return (
                           <div key={`dossier-${dossier.id}`} className="bg-white border border-purple-200 shadow-sm rounded-2xl p-6 relative overflow-hidden ring-1 ring-purple-100">
@@ -1937,14 +2085,49 @@ export default function ProjectDetails() {
                           <div className="flex justify-between items-center mb-6">
                             <div>
                               <div className="flex items-center gap-3">
-                                <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</h4>
+                                <h4 className="font-black text-slate-900 text-lg">Encaissement : {enc.mode} {enc.year ? `(Année ${enc.year})` : enc.annexeName ? `(${enc.annexeName})` : ''}</h4>
                               </div>
-                              <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')}</span>
+                              <span className="text-slate-500 text-xs font-bold mt-1 block">Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR')} {enc.annexePrice !== undefined ? ` | Prix HT : ${enc.annexePrice.toLocaleString()} DA` : ''}</span>
                             </div>
-                            <span className={cn(
-                              "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
-                              enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                            )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
+                            <div className="flex items-center gap-2">
+                               {enc.mode === 'Annexe' && project.encaissements?.some(e => e.mode === 'Acquisition') && (
+                                 <button 
+                                   onClick={async () => {
+                                      const acqEnc = project.encaissements!.find(e => e.mode === 'Acquisition');
+                                      if (!acqEnc) return;
+                                      
+                                      if (window.confirm("Voulez-vous lier cette prestation annexe à l'encaissement d'Acquisition ? (Ils seront fusionnés)")) {
+                                        const dossierId = acqEnc.combinedWithDossierId || (acqEnc as any).dossierId;
+                                        if (acqEnc.isCombined && dossierId) {
+                                          const dossier = dossiersPaiement.find(d => d.id === dossierId);
+                                          if (dossier) {
+                                            updateDossierPaiement(dossier.id, { encaissementIds: [...dossier.encaissementIds, enc.id] });
+                                            updateEncaissement(project.id, enc.id, { isCombined: true, combinedWithDossierId: dossier.id });
+                                          }
+                                        } else {
+                                          const newDossierId = await addDossierPaiement({
+                                            clientId: client.id,
+                                            projectIds: [project.id],
+                                            encaissementIds: [acqEnc.id, enc.id],
+                                            status: 'DRAFT',
+                                            total: 0,
+                                            encaisse: 0
+                                          });
+                                          updateEncaissement(project.id, acqEnc.id, { isCombined: true, combinedWithDossierId: newDossierId });
+                                          updateEncaissement(project.id, enc.id, { isCombined: true, combinedWithDossierId: newDossierId });
+                                        }
+                                      }
+                                   }}
+                                   className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors shadow-sm border border-indigo-100"
+                                 >
+                                   Lier à l'Acquisition
+                                 </button>
+                               )}
+                               <span className={cn(
+                                 "px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest",
+                                 enc.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                               )}>{enc.status === 'PARTIAL' ? 'Paiement Partiel' : 'En Cours'}</span>
+                            </div>
                           </div>
                           
                           {renderDocManagement(enc)}
@@ -2036,6 +2219,15 @@ export default function ProjectDetails() {
 
           let totalHT = 0;
           const items = encaissementsToCombine.map(e => {
+             if (e.mode === 'Annexe') {
+               const price = e.annexePrice || 0;
+               totalHT += price;
+               return {
+                 description: e.annexeName || 'Prestation Annexe',
+                 price
+               };
+             }
+
              const p = projects.find(pr => pr.id === e.projectId);
              const prod = p?.product || project.product;
              const vers = p?.version || project.version;
