@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power } from 'lucide-react';
@@ -39,6 +39,7 @@ export default function ProjectDetails() {
     activateMaintenanceEncaissement,
     addHistoryEvent,
     addDocumentHistoryEvent,
+    addDossierPaiement,
     dossiersPaiement
   } = useStore();
 
@@ -52,7 +53,6 @@ export default function ProjectDetails() {
   const [showEditProject, setShowEditProject] = useState(false);
   const [showContractManager, setShowContractManager] = useState(false);
   const [showFacturation, setShowFacturation] = useState(false);
-  const [showActivationModal, setShowActivationModal] = useState<{ isOpen: boolean, encaissementId: string | null }>({ isOpen: false, encaissementId: null });
   const [selectedMergeCandidate, setSelectedMergeCandidate] = useState<string>('none');
   const [previewModalConfig, setPreviewModalConfig] = useState<{
     isOpen: boolean;
@@ -64,7 +64,7 @@ export default function ProjectDetails() {
   }>({ isOpen: false, type: 'PROFORMA' });
   
   const mergeCandidates = useMemo(() => {
-    if (!showActivationModal.isOpen || !project?.clientId) return [];
+    if (!project?.clientId) return [];
     
     const candidates: Array<{ type: 'DOSSIER' | 'SINGLE', id: string, name: string, projectId?: string }> = [];
     
@@ -82,7 +82,7 @@ export default function ProjectDetails() {
     clientProjects.forEach(p => {
       if (p.encaissements) {
         p.encaissements.forEach(e => {
-          if (!e.isCombined && (e.status === 'IN_PROGRESS' || e.status === 'PARTIAL') && e.id !== showActivationModal.encaissementId) {
+          if (!e.isCombined && (e.status === 'IN_PROGRESS' || e.status === 'PARTIAL')) {
             candidates.push({ type: 'SINGLE', id: e.id, projectId: p.id, name: `Encaissement ${e.mode} - Projet: ${p.name}` });
           }
         });
@@ -90,10 +90,46 @@ export default function ProjectDetails() {
     });
 
     return candidates;
-  }, [showActivationModal.isOpen, project, dossiersPaiement, projects]);
+  }, [project, dossiersPaiement, projects]);
 
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
+
+  const [manualFusionSelection, setManualFusionSelection] = useState<any[]>([]);
+  const [isCreatingDossier, setIsCreatingDossier] = useState(false);
+  const isCreatingRef = useRef(false);
+
+  const handleCreateDossier = async (group: any[]) => {
+     if (isCreatingRef.current || group.length === 0) return;
+     isCreatingRef.current = true;
+     setIsCreatingDossier(true);
+     try {
+       const newId = await addDossierPaiement({
+          clientId: project.clientId,
+          projectIds: Array.from(new Set(group.map(e => e.projectId || project.id))),
+          encaissementIds: group.map(e => e.id),
+          status: 'DRAFT',
+          total: 0,
+          encaisse: 0
+       });
+       
+       if (newId) {
+         group.forEach(e => {
+            updateEncaissement(e.projectId || project.id, e.id, { isCombined: true, combinedWithDossierId: newId });
+         });
+       }
+       setManualFusionSelection([]);
+       
+       setTimeout(() => {
+         isCreatingRef.current = false;
+         setIsCreatingDossier(false);
+       }, 500);
+     } catch (e) {
+       console.error("Erreur lors de la création du dossier", e);
+       isCreatingRef.current = false;
+       setIsCreatingDossier(false);
+     }
+  };
 
   // Self-healing logic for Maintenance contract
   useEffect(() => {
@@ -613,6 +649,16 @@ export default function ProjectDetails() {
               </h3>
               <p className="text-slate-500 text-sm mt-1 font-semibold">Suivi automatisé des acquisitions et maintenances</p>
             </div>
+            {manualFusionSelection.length >= 2 && (
+              <button
+                disabled={isCreatingDossier}
+                onClick={() => handleCreateDossier(manualFusionSelection)}
+                className={`px-4 py-2 rounded-xl font-bold transition-colors shadow-sm flex items-center gap-2 text-sm ${isCreatingDossier ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'}`}
+              >
+                <FolderKanban className="w-4 h-4" />
+                {isCreatingDossier ? 'Création...' : "Créer Dossier d'encaissement"}
+              </button>
+            )}
           </div>
 
           {(!project.encaissements || project.encaissements.length === 0) ? (
@@ -622,13 +668,6 @@ export default function ProjectDetails() {
               <p className="text-slate-400 text-sm mt-1">Validez la tâche "Formation" dans l'Acquisition pour générer l'échéancier initial.</p>
             </div>
           ) : (() => {
-            const isDossierManager = (enc: any) => {
-               if (!enc.isCombined) return true;
-               const dossierId = enc.combinedWithDossierId || enc.dossierId;
-               const dossier = dossiersPaiement.find(d => d.id === dossierId);
-               if (!dossier) return true;
-               return dossier.encaissementIds[dossier.encaissementIds.length - 1] === enc.id;
-            };
 
             const sortedEncaissements = [...project.encaissements].sort((a, b) => {
                const timeA = a.targetDate ? new Date(a.targetDate).getTime() : 0;
@@ -641,13 +680,41 @@ export default function ProjectDetails() {
                return 0;
             });
             
-            const pastEncaissements = sortedEncaissements.filter((enc) => {
-               if (enc.status === 'DONE' || enc.status === 'ABANDONED') return true;
-               if (enc.isCombined && !isDossierManager(enc)) return true;
-               return false;
+            const pastEncaissements = sortedEncaissements.filter(e => e.status === 'DONE' || e.status === 'ABANDONED');
+            
+            const activeIndependent = sortedEncaissements.filter(e => 
+               !pastEncaissements.includes(e) && !e.isCombined
+            );
+
+            const activeCombinedEncaissements = sortedEncaissements.filter(e => 
+               !pastEncaissements.includes(e) && e.isCombined
+            );
+            
+            const projectDossiersMap = new Map<string, typeof project.encaissements>();
+            activeCombinedEncaissements.forEach(e => {
+                const dossierId = e.combinedWithDossierId || e.dossierId;
+                if (!dossierId) return;
+                if (!projectDossiersMap.has(dossierId)) {
+                   projectDossiersMap.set(dossierId, []);
+                }
+                projectDossiersMap.get(dossierId)!.push(e);
             });
-            const pastIds = new Set(pastEncaissements.map(e => e.id));
-            const activeEncaissements = sortedEncaissements.filter(enc => !pastIds.has(enc.id));
+
+            const activeItems: any[] = [];
+            activeIndependent.forEach(e => activeItems.push({ type: 'ENCAISSEMENT', data: e, date: e.targetDate }));
+            
+            projectDossiersMap.forEach((encs, dossierId) => {
+                const dossier = dossiersPaiement.find(d => d.id === dossierId);
+                if (dossier) {
+                    activeItems.push({ type: 'DOSSIER', data: dossier, encaissements: encs, date: encs[0]?.targetDate });
+                }
+            });
+
+            activeItems.sort((a, b) => {
+                const timeA = a.date ? new Date(a.date).getTime() : 0;
+                const timeB = b.date ? new Date(b.date).getTime() : 0;
+                return timeA - timeB;
+            });
 
             const renderEncaissementCard = (enc: any, isStacked: boolean = false, stackIdx: number = 0, totalStacked: number = 0) => {
                 const isUpcoming = enc.status === 'UPCOMING';
@@ -698,9 +765,26 @@ export default function ProjectDetails() {
                     isStacked ? "hover:-translate-y-2 hover:opacity-100 hover:z-50 cursor-pointer shadow-lg bg-slate-100 border-slate-300" :
                     isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80 shadow-sm" :
                     isDone ? "bg-emerald-50 border-emerald-200/60 shadow-sm" :
-                    "bg-white border-blue-200/60 shadow-md shadow-blue-500/5"
+                    "bg-white border-blue-200/60 shadow-md shadow-blue-500/5",
+                    manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
                   )}>
                     <div className="flex items-center gap-4">
+                      {!isStacked && !enc.isCombined && isProgress && (
+                        <div className="pt-1">
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                            checked={manualFusionSelection.some(e => e.id === enc.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setManualFusionSelection([...manualFusionSelection, enc]);
+                              } else {
+                                setManualFusionSelection(manualFusionSelection.filter(item => item.id !== enc.id));
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
                       <div className={cn(
                         "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
                         isStacked ? "bg-slate-200 text-slate-500" :
@@ -775,13 +859,69 @@ export default function ProjectDetails() {
                             <Clock className="w-4 h-4" /> En attente
                           </span>
                           <button
-                            onClick={() => setShowActivationModal({ isOpen: true, encaissementId: enc.id })}
+                            onClick={() => {
+                              if (window.confirm("Voulez-vous vraiment activer la facturation de cette maintenance ?\n\nLa phase 'Maintenance Gratuite' sera terminée et l'encaissement passera en cours.")) {
+                                activateMaintenanceEncaissement(project.id, enc.id);
+                              }
+                            }}
                             className="px-4 py-2 bg-purple-100 text-purple-700 hover:bg-purple-200 hover:text-purple-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2"
                           >
                             <Power className="w-4 h-4" /> Activer
                           </button>
                         </div>
                       )}
+                    </div>
+                  </div>
+                );
+            };
+
+            const renderDossierCard = (dossier: any, encs: any[]) => {
+                return (
+                  <div key={dossier.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
+                        <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
+                        <button 
+                          onClick={() => {
+                            if (confirm("Voulez-vous vraiment supprimer ce dossier de paiement ? Les encaissements redeviendront indépendants.")) {
+                              dissociateDossier(dossier.id);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Défusionner"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3 mb-5">
+                      {encs.map((enc: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
+                          <div>
+                            <div className="text-sm font-bold text-slate-800">{enc.mode} {enc.year ? `(Année ${enc.year})` : ''}</div>
+                            <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
+                              <span className="uppercase">{project.product} {project.version}</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] text-slate-400 font-medium">Début</div>
+                            <div className="text-sm font-bold text-slate-900">{new Date(enc.targetDate).toLocaleDateString('fr-FR')}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
+                      <button 
+                        onClick={() => setShowFacturation(true)}
+                        className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
+                      >
+                        <Banknote className="w-4 h-4" /> Gérer l'encaissement
+                      </button>
                     </div>
                   </div>
                 );
@@ -795,9 +935,13 @@ export default function ProjectDetails() {
                   </div>
                 )}
                 
-                {activeEncaissements.length > 0 && (
+                {activeItems.length > 0 && (
                   <div className="space-y-4">
-                    {activeEncaissements.map(enc => renderEncaissementCard(enc))}
+                    {activeItems.map((item, index) => 
+                       item.type === 'ENCAISSEMENT' 
+                         ? renderEncaissementCard(item.data)
+                         : renderDossierCard(item.data, item.encaissements)
+                    )}
                   </div>
                 )}
               </div>
@@ -1411,79 +1555,6 @@ export default function ProjectDetails() {
         </div>
         );
       })()}
-
-      {/* MODAL: Activation Anticipée */}
-      {showActivationModal.isOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-lg">
-            <button type="button" onClick={() => setShowActivationModal({ isOpen: false, encaissementId: null })} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
-            
-            <div className="space-y-1 mb-6">
-              <h3 className="font-extrabold text-slate-900 text-xl flex items-center gap-3">
-                <Power className="w-6 h-6 text-purple-500" />
-                Activation Anticipée
-              </h3>
-              <p className="text-slate-500 text-xs font-bold">Activer la facturation de cette maintenance avant la fin de l'exercice gratuit.</p>
-            </div>
-
-            <div className="bg-purple-50 border border-purple-100 p-4 rounded-xl mb-6">
-              <p className="text-sm font-bold text-purple-900 mb-2">Attention :</p>
-              <ul className="list-disc pl-5 text-xs text-purple-700 space-y-1">
-                <li>La phase "Maintenance Gratuite" sera automatiquement marquée comme terminée/sautée.</li>
-                <li>La date de début de l'encaissement de la maintenance sera fixée à aujourd'hui.</li>
-              </ul>
-            </div>
-
-            {mergeCandidates.length > 0 ? (
-              <div className="space-y-3 mb-6">
-                <label className="text-sm font-extrabold text-slate-800">Souhaitez-vous fusionner cet encaissement avec un autre en cours ?</label>
-                <select 
-                  value={selectedMergeCandidate} 
-                  onChange={(e) => setSelectedMergeCandidate(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-purple-500"
-                >
-                  <option value="none">Non, l'activer séparément</option>
-                  {mergeCandidates.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-600 font-bold mb-6">Aucun autre encaissement en cours détecté pour ce client.</p>
-            )}
-
-            <div className="flex justify-end gap-3">
-              <button 
-                onClick={() => setShowActivationModal({ isOpen: false, encaissementId: null })}
-                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
-              >
-                Annuler
-              </button>
-              <button 
-                onClick={() => {
-                  const candidate = mergeCandidates.find(c => c.id === selectedMergeCandidate);
-                  let mergeConfig = undefined;
-                  if (candidate) {
-                    if (candidate.type === 'DOSSIER') {
-                      mergeConfig = { dossierId: candidate.id };
-                    } else {
-                      mergeConfig = { otherEncaissementId: candidate.id, otherProjectId: candidate.projectId, clientId: project.clientId };
-                    }
-                  }
-                  
-                  if (showActivationModal.encaissementId) {
-                    activateMaintenanceEncaissement(project.id, showActivationModal.encaissementId, mergeConfig);
-                  }
-                  setShowActivationModal({ isOpen: false, encaissementId: null });
-                }}
-                className="px-5 py-2.5 rounded-xl font-bold text-white bg-purple-600 hover:bg-purple-700 transition-colors shadow-md"
-              >
-                Activer la Maintenance
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* NEW MODAL: Facturation */}
       {showFacturation && (
