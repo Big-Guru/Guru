@@ -31,9 +31,7 @@ export default function EncaissementsList() {
   });
 
   const activeDossiers = dossiersPaiement.map(dossier => {
-    const encsInDossier = dossier.encaissementIds
-      .map(id => allActiveEncaissements.find(e => e.id === id))
-      .filter(Boolean) as typeof allActiveEncaissements;
+    const encsInDossier = allActiveEncaissements.filter(e => e.combinedWithDossierId === dossier.id || (e as any).dossierId === dossier.id);
     return {
       dossier,
       encaissements: encsInDossier,

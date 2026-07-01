@@ -96,20 +96,42 @@ export default function ClientDetails() {
      isCreatingRef.current = true;
      setIsCreatingDossier(true);
      try {
-       const newId = await addDossierPaiement({
-          clientId: client.id,
-          projectIds: Array.from(new Set(group.map(e => e.projectId))),
-          encaissementIds: group.map(e => e.id),
-          status: 'DRAFT',
-          total: 0,
-          encaisse: 0
-       });
+       const existingDossierId = group.find(e => e.isCombined && e.combinedWithDossierId)?.combinedWithDossierId;
        
-       if (newId) {
-         group.forEach(e => {
-            updateEncaissement(e.projectId, e.id, { isCombined: true, combinedWithDossierId: newId });
+       if (existingDossierId) {
+         const dossier = dossiersPaiement.find(d => d.id === existingDossierId);
+         if (dossier) {
+           const newProjectIds = Array.from(new Set([...dossier.projectIds, ...group.map(e => e.projectId)]));
+           const newEncaissementIds = Array.from(new Set([...dossier.encaissementIds, ...group.map(e => e.id)]));
+           
+           updateDossierPaiement(existingDossierId, {
+             projectIds: newProjectIds,
+             encaissementIds: newEncaissementIds
+           });
+           
+           group.forEach(e => {
+              if (!e.isCombined || e.combinedWithDossierId !== existingDossierId) {
+                updateEncaissement(e.projectId, e.id, { isCombined: true, combinedWithDossierId: existingDossierId });
+              }
+           });
+         }
+       } else {
+         const newId = await addDossierPaiement({
+            clientId: client.id,
+            projectIds: Array.from(new Set(group.map(e => e.projectId))),
+            encaissementIds: group.map(e => e.id),
+            status: 'DRAFT',
+            total: 0,
+            encaisse: 0
          });
+         
+         if (newId) {
+           group.forEach(e => {
+              updateEncaissement(e.projectId, e.id, { isCombined: true, combinedWithDossierId: newId });
+           });
+         }
        }
+       
        setSelectedFusionGroup(null);
        setManualFusionSelection([]);
        

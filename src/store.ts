@@ -106,8 +106,8 @@ interface AppState {
   removeEncaissementFromDossier: (projectId: string, encaissementId: string) => void;
   updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
   addDocumentHistoryEvent: (projectId: string, encaissementId: string, event: Omit<DocumentHistoryEvent, 'id'>) => void;
-  generateMaintenanceEncaissement: (projectId: string) => void;
   activateMaintenanceEncaissement: (projectId: string, encaissementId: string, mergeConfig?: { dossierId?: string; otherEncaissementId?: string; otherProjectId?: string; clientId?: string }) => Promise<void>;
+  deactivateMaintenanceEncaissement: (projectId: string, encaissementId: string) => Promise<void>;
 }
 
 export const useStore = create<AppState>()(
@@ -909,12 +909,6 @@ export const useStore = create<AppState>()(
               status: 'IN_PROGRESS' as const
             };
           }
-          if (e.mode === 'Maintenance' && e.year === currentYear - 1 && e.status === 'IN_PROGRESS') {
-            return {
-              ...e,
-              status: 'DONE' as const
-            };
-          }
           return e;
         });
 
@@ -937,10 +931,6 @@ export const useStore = create<AppState>()(
         
         updatedContracts = updatedContracts.map(c => {
           if (c.mode === 'Maintenance offerte' && c.status !== 'CLOSED' && c.status !== 'DONE') {
-            return { ...c, status: 'DONE' as const };
-          }
-          if (c.mode === 'Maintenance' && c.status !== 'DONE' && c.status !== 'CLOSED') {
-            // Clôturer l'année précédente
             return { ...c, status: 'DONE' as const };
           }
           return c;
@@ -1026,6 +1016,74 @@ export const useStore = create<AppState>()(
             state.updateEncaissement(mergeConfig.otherProjectId, mergeConfig.otherEncaissementId, { isCombined: true, combinedWithDossierId: newDossierId });
           }
         }
+      },
+      deactivateMaintenanceEncaissement: async (projectId, encaissementId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project || !project.encaissements) return;
+
+        const targetEnc = project.encaissements.find(e => e.id === encaissementId);
+        if (!targetEnc || targetEnc.mode !== 'Maintenance') return;
+
+        const currentYear = Number(targetEnc.year) || 1;
+
+        let updatedEncaissements = project.encaissements.map(e => {
+          if (e.id === encaissementId) {
+            return {
+              ...e,
+              status: 'UPCOMING' as const
+            };
+          }
+          return e;
+        });
+
+        updatedEncaissements = updatedEncaissements.map(e => {
+          if (currentYear > 1 && e.mode === 'Maintenance' && e.year === currentYear - 1 && e.status === 'DONE') {
+            return {
+              ...e,
+              status: 'IN_PROGRESS' as const
+            };
+          }
+          return e;
+        });
+
+        updatedEncaissements = updatedEncaissements.filter(e => !(e.mode === 'Maintenance' && e.year === currentYear + 1));
+
+        let updatedContracts = project.contracts || [];
+        
+        updatedContracts = updatedContracts.filter(c => !(c.mode === 'Maintenance' && (c.name === `Maintenance Année ${currentYear + 1}` || c.name === `Maintenance Année ${currentYear + 1} `)));
+
+        updatedContracts = updatedContracts.map(c => {
+          if (c.mode === 'Maintenance' && c.name === `Maintenance Année ${currentYear}`) {
+            return {
+              ...c,
+              status: 'PENDING' as const,
+              phases: c.phases.map(ph => ({ ...ph, status: 'PENDING' as const }))
+            };
+          }
+          if (currentYear > 1 && c.mode === 'Maintenance' && c.name === `Maintenance Année ${currentYear - 1}`) {
+            return {
+              ...c,
+              status: 'ACTIVE' as const
+            };
+          }
+          return c;
+        });
+
+        const newHistory = [
+          ...(project.history || []),
+          {
+            id: uuidv4(),
+            date: new Date().toLocaleDateString('fr-FR'),
+            message: `Activation de la Maintenance Année ${currentYear} annulée.`
+          }
+        ];
+
+        state.updateProject(projectId, { 
+          encaissements: updatedEncaissements, 
+          contracts: updatedContracts,
+          history: newHistory 
+        });
       },
       addDossierPaiement: async (dossierData) => {
         const id = uuidv4();
