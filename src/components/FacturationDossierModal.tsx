@@ -200,16 +200,49 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                         <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">2</span>
                         <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Bon Commande</span>
                       </div>
-                      <select 
-                        value={enc.bc.status} 
-                        onChange={e => updateEncaissement(enc.projectId, enc.id, { bc: { ...enc.bc, status: e.target.value as any } })}
-                        className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
-                        disabled={enc.proforma.status !== 'VALIDATED'}
-                      >
-                        <option value="PENDING">En attente</option>
-                        <option value="RECOVERED">Récupéré</option>
-                      </select>
+                      <div className="flex-1 flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Numéro du BC"
+                          value={enc.bc.documentId || ''}
+                          onChange={(e) => {
+                            const newNum = e.target.value;
+                            const isComplete = newNum.trim() !== '' && !!enc.bc.date;
+                            updateEncaissement(enc.projectId, enc.id, { 
+                              bc: { 
+                                ...enc.bc, 
+                                documentId: newNum,
+                                status: isComplete ? 'RECOVERED' : 'PENDING'
+                              } 
+                            });
+                          }}
+                          className="w-1/2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
+                          disabled={enc.proforma.status !== 'VALIDATED'}
+                        />
+                        <input
+                          type="date"
+                          value={enc.bc.date || ''}
+                          onChange={(e) => {
+                            const newDate = e.target.value;
+                            const isComplete = !!enc.bc.documentId?.trim() && newDate !== '';
+                            updateEncaissement(enc.projectId, enc.id, { 
+                              bc: { 
+                                ...enc.bc, 
+                                date: newDate,
+                                status: isComplete ? 'RECOVERED' : 'PENDING'
+                              } 
+                            });
+                          }}
+                          className="w-1/2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
+                          disabled={enc.proforma.status !== 'VALIDATED'}
+                        />
+                      </div>
                       <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end min-w-[120px]">
+                         {enc.bc.status === 'RECOVERED' && (
+                           <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-wider border border-emerald-200">
+                             Récupéré
+                           </span>
+                         )}
                       </div>
                     </div>
                     
@@ -383,10 +416,21 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                isReadOnly={previewModalConfig.isReadOnly}
                onClose={() => setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' })}
                onSaveDraft={(updatedDraft) => {
+                  const currentUser = auth.currentUser;
+                  const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
+                  
                   if (previewModalConfig.type === 'PROFORMA') {
-                     updateEncaissement(targetProject.id, targetEnc.id, { proforma: { ...targetEnc.proforma, status: 'GENERATED', draft: updatedDraft } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Brouillon généré/enregistré', draftSnapshot: updatedDraft, user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        proforma: { ...targetEnc.proforma, status: 'GENERATED', draft: updatedDraft },
+                        documentHistory: newHistory
+                     });
                   } else {
-                     updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'GENERATED', draft: updatedDraft } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Brouillon généré/enregistré', draftSnapshot: updatedDraft, user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        facture: { ...targetEnc.facture, status: 'GENERATED', draft: updatedDraft },
+                        documentHistory: newHistory
+                     });
                   }
                }}
                onSubmitValidation={() => {

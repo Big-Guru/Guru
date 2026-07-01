@@ -60,6 +60,12 @@ export interface EncaissementRecord {
   isCombined?: boolean;
   combinedWithDossierId?: string;
   documentHistory?: DocumentHistoryEvent[];
+  
+  // Facturation Fields
+  potentiel?: 'Faible' | 'Moyen' | 'Réalisé';
+  encaissementCetteAnnee?: 'Probable' | 'Peu probable' | 'Effectué';
+  observation?: string;
+  emetteur?: string;
 }
 
 export interface DossierPaiement {
@@ -71,6 +77,12 @@ export interface DossierPaiement {
   createdAt: string;
   total: number;
   encaisse: number;
+  
+  // Facturation Fields
+  potentiel?: 'Faible' | 'Moyen' | 'Réalisé';
+  encaissementCetteAnnee?: 'Probable' | 'Peu probable' | 'Effectué';
+  observation?: string;
+  emetteur?: string;
 }
 
 export interface Client {
