@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { X, Banknote } from 'lucide-react';
 import { useStore } from '../store';
 import { Client, EncaissementRecord } from '../types';
-import { cn } from '../lib/utils';
 import DocumentPreviewModal from './DocumentPreviewModal';
+import { auth } from '../lib/firebase';
+import { v4 as uuidv4 } from 'uuid';
+import { FileText } from 'lucide-react';
 
 interface FacturationSingleModalProps {
   projectId: string;
@@ -16,7 +18,7 @@ interface FacturationSingleModalProps {
 
 export default function FacturationSingleModal({ projectId, projectName, product, client, encaissement: enc, onClose }: FacturationSingleModalProps) {
   const { updateEncaissement, generateMaintenanceEncaissement, projects } = useStore();
-  const [previewModalConfig, setPreviewModalConfig] = useState<{ isOpen: boolean; type: 'PROFORMA' | 'FACTURE'; encaissementId?: string; draftSnapshot?: any; isReadOnly?: boolean; readOnlyStatus?: string; projectId?: string }>({
+  const [previewModalConfig, setPreviewModalConfig] = useState<{ isOpen: boolean; type: 'PROFORMA' | 'FACTURE'; encaissementId?: string; draftSnapshot?: any; isReadOnly?: boolean; readOnlyStatus?: string; projectId?: string; autoSave?: boolean }>({
     isOpen: false,
     type: 'PROFORMA'
   });
@@ -65,12 +67,13 @@ export default function FacturationSingleModal({ projectId, projectName, product
                   >
                     <option value="PENDING">À générer</option>
                     <option value="GENERATED">Générée</option>
-                    <option value="TO_VERIFY">À vérifier (DFC)</option>
+                    <option value="TO_VERIFY">Soumise à validation</option>
                     <option value="VALIDATED">Validée</option>
+                    <option value="DEPOSITED">Transmise</option>
                   </select>
                   <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
                     <button 
-                      onClick={() => setPreviewModalConfig({ isOpen: true, type: 'PROFORMA', encaissementId: enc.id, projectId: projectId })}
+                      onClick={() => setPreviewModalConfig({ isOpen: true, type: 'PROFORMA', encaissementId: enc.id, projectId: projectId, autoSave: enc.proforma.status === 'PENDING' })}
                       className="px-5 py-2.5 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 rounded-xl text-xs font-bold transition-all"
                     >
                       {enc.proforma.status === 'PENDING' ? 'Générer' : 'Ouvrir'}
@@ -123,11 +126,13 @@ export default function FacturationSingleModal({ projectId, projectName, product
                   >
                     <option value="PENDING">À générer</option>
                     <option value="GENERATED">Générée</option>
-                    <option value="VALIDATED">Établie et envoyée</option>
+                    <option value="TO_VERIFY">Soumise à validation</option>
+                    <option value="VALIDATED">Validée</option>
+                    <option value="DEPOSITED">Transmise</option>
                   </select>
                   <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
                     <button 
-                      onClick={() => setPreviewModalConfig({ isOpen: true, type: 'FACTURE', encaissementId: enc.id, projectId: projectId })}
+                      onClick={() => setPreviewModalConfig({ isOpen: true, type: 'FACTURE', encaissementId: enc.id, projectId: projectId, autoSave: enc.facture.status === 'PENDING' })}
                       className="px-5 py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:pointer-events-none"
                       disabled={enc.bc.status !== 'RECOVERED'}
                     >
@@ -202,6 +207,8 @@ export default function FacturationSingleModal({ projectId, projectName, product
                   <span>{enc.resteDette.toLocaleString()} DA</span>
                 </div>
               ) : null}
+              
+
            </div>
         </div>
         
@@ -219,7 +226,7 @@ export default function FacturationSingleModal({ projectId, projectName, product
          
          const docStatus = previewModalConfig.type === 'PROFORMA' ? targetEnc.proforma.status : targetEnc.facture.status;
          const draft = previewModalConfig.draftSnapshot || (previewModalConfig.type === 'PROFORMA' ? targetEnc.proforma.draft : targetEnc.facture.draft) || {
-            documentNumber: `${previewModalConfig.type === 'PROFORMA' ? 'PF' : 'FA'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`,
+            documentNumber: useStore.getState().getNextDocumentNumber(previewModalConfig.type),
             createdAt: new Date().toISOString(),
             items: [],
             totalHT: 0,
@@ -239,30 +246,73 @@ export default function FacturationSingleModal({ projectId, projectName, product
                status={previewModalConfig.readOnlyStatus || docStatus}
                isReadOnly={previewModalConfig.isReadOnly}
                onClose={() => setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' })}
-               onSaveDraft={(updatedDraft) => {
+               autoSave={previewModalConfig.autoSave}
+               onSaveDraft={(updatedDraft, actionLabel) => {
+                  const currentUser = auth.currentUser;
+                  const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
                   if (previewModalConfig.type === 'PROFORMA') {
-                     updateEncaissement(targetProject.id, targetEnc.id, { proforma: { ...targetEnc.proforma, status: 'GENERATED', draft: updatedDraft } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: actionLabel || 'Brouillon mis à jour', draftSnapshot: updatedDraft, user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        proforma: { ...targetEnc.proforma, status: 'GENERATED', draft: updatedDraft },
+                        documentHistory: newHistory
+                     });
                   } else {
-                     updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'GENERATED', draft: updatedDraft } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: actionLabel || 'Brouillon mis à jour', draftSnapshot: updatedDraft, user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        facture: { ...targetEnc.facture, status: 'GENERATED', draft: updatedDraft },
+                        documentHistory: newHistory
+                     });
                   }
                }}
                onSubmitValidation={() => {
+                  const currentUser = auth.currentUser;
+                  const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
                   if (previewModalConfig.type === 'PROFORMA') {
-                     updateEncaissement(targetProject.id, targetEnc.id, { proforma: { ...targetEnc.proforma, status: 'TO_VERIFY' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Soumise à validation', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        proforma: { ...targetEnc.proforma, status: 'TO_VERIFY' },
+                        documentHistory: newHistory
+                     });
                   } else {
-                     updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'TO_VERIFY' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Soumise à validation', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        facture: { ...targetEnc.facture, status: 'TO_VERIFY' },
+                        documentHistory: newHistory
+                     });
                   }
                }}
                onValidate={() => {
+                  const currentUser = auth.currentUser;
+                  const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
                   if (previewModalConfig.type === 'PROFORMA') {
-                     updateEncaissement(targetProject.id, targetEnc.id, { proforma: { ...targetEnc.proforma, status: 'VALIDATED' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Validée', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        proforma: { ...targetEnc.proforma, status: 'VALIDATED' },
+                        documentHistory: newHistory
+                     });
                   } else {
-                     updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'VALIDATED' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Validée', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        facture: { ...targetEnc.facture, status: 'VALIDATED' },
+                        documentHistory: newHistory
+                     });
                   }
                }}
                onDeposit={() => {
-                 if (previewModalConfig.type === 'FACTURE') {
-                    updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'VALIDATED' } });
+                 const currentUser = auth.currentUser;
+                 const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
+                 if (previewModalConfig.type === 'PROFORMA') {
+                    const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Transmise', user: userName }];
+                    updateEncaissement(targetProject.id, targetEnc.id, { 
+                       proforma: { ...targetEnc.proforma, status: 'DEPOSITED' },
+                       documentHistory: newHistory
+                    });
+                 } else {
+                    const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Transmise', user: userName }];
+                    updateEncaissement(targetProject.id, targetEnc.id, { 
+                       facture: { ...targetEnc.facture, status: 'DEPOSITED' },
+                       documentHistory: newHistory
+                    });
                  }
                }}
             />

@@ -18,7 +18,7 @@ service cloud.firestore {
              data.address is string && data.address.size() <= 500 &&
              data.wilaya is string && data.wilaya.size() <= 100 &&
              data.effectif is number &&
-             data.effectifType in ['SALARIES', 'POSTES', 'ETUDIANTS'] &&
+             data.effectifType in ['UNIVERSITE', 'EH_DA'] &&
              data.nif is string && data.nif.size() <= 50 &&
              data.nis is string && data.nis.size() <= 50 &&
              data.rc is string && data.rc.size() <= 50 &&
@@ -113,6 +113,10 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(dossierId) && isValidDossier(incoming());
       allow update: if isSignedIn() && isValidId(dossierId) && isValidDossier(incoming());
       allow delete: if isSignedIn() && isValidId(dossierId);
+    }
+
+    match /products/{productId} {
+      allow read, write: if isSignedIn();
     }
   }
 }

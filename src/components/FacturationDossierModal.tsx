@@ -4,7 +4,9 @@ import { useStore } from '../store';
 import { Client, EncaissementRecord } from '../types';
 import { cn } from '../lib/utils';
 import DocumentPreviewModal from './DocumentPreviewModal';
-import { getPrice } from '../lib/pricing';
+import { getPrice, getDesignation } from '../lib/pricing';
+import { auth } from '../lib/firebase';
+import { v4 as uuidv4 } from 'uuid';
 
 interface EnrichedEncaissement extends EncaissementRecord {
   projectId: string;
@@ -22,10 +24,11 @@ interface FacturationDossierModalProps {
 export default function FacturationDossierModal({ dossierId, client, encaissements, onClose }: FacturationDossierModalProps) {
   const { updateEncaissement, generateMaintenanceEncaissement, dissociateDossier, removeEncaissementFromDossier, projects } = useStore();
   
-  const [previewModalConfig, setPreviewModalConfig] = useState<{ isOpen: boolean; type: 'PROFORMA' | 'FACTURE'; encaissementId?: string; draftSnapshot?: any; isReadOnly?: boolean; readOnlyStatus?: string; projectId?: string }>({
+  const [previewModalConfig, setPreviewModalConfig] = useState<{ isOpen: boolean; type: 'PROFORMA' | 'FACTURE'; encaissementId?: string; draftSnapshot?: any; isReadOnly?: boolean; readOnlyStatus?: string; projectId?: string; autoSave?: boolean }>({
     isOpen: false,
     type: 'PROFORMA'
   });
+  const [activeTab, setActiveTab] = useState<'facturation' | 'documents'>('facturation');
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -37,21 +40,10 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
               <Banknote className="w-6 h-6 text-emerald-500" />
               Gestion du Dossier d'encaissement
             </h3>
-            <p className="text-slate-500 text-xs font-bold">Dossier fusionné - Client : {client.name}</p>
+            <p className="text-slate-500 text-xs font-bold">
+              {encaissements.length > 1 ? 'Dossier fusionné' : 'Dossier'} - Client : {client.name}
+            </p>
           </div>
-          {encaissements.length > 0 && (
-            <button
-              onClick={() => {
-                if(window.confirm("Êtes-vous sûr de vouloir dissocier ce dossier ? Les encaissements redeviendront indépendants.")) {
-                  dissociateDossier(dossierId);
-                  onClose();
-                }
-              }}
-              className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-sm border border-red-100 hover:border-red-600 flex items-center gap-2"
-            >
-              Dissocier le dossier
-            </button>
-          )}
         </div>
         
         <div className="flex-1 overflow-y-auto pr-2 space-y-6">
@@ -63,15 +55,29 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
           ) : (
             <>
               {/* Encaissements inclus dans le Dossier */}
+              {encaissements.length > 1 && (
               <div className="bg-slate-50 border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden mb-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
-                    <FolderKanban className="w-5 h-5 text-indigo-500" />
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
+                      <FolderKanban className="w-5 h-5 text-indigo-500" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-800 text-lg">Encaissements inclus</h4>
+                      <p className="text-xs font-bold text-slate-500">Liste des encaissements regroupés dans ce dossier</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-black text-slate-800 text-lg">Encaissements inclus</h4>
-                    <p className="text-xs font-bold text-slate-500">Liste des encaissements regroupés dans ce dossier</p>
-                  </div>
+                  <button 
+                    onClick={() => {
+                      if(window.confirm("Êtes-vous sûr de vouloir dissocier entièrement ce dossier ?")) {
+                         dissociateDossier(dossierId);
+                         onClose();
+                      }
+                    }}
+                    className="px-5 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-full font-black text-sm uppercase tracking-wider transition-colors border border-red-100"
+                  >
+                    DISSOCIER LE DOSSIER
+                  </button>
                 </div>
                 
                 <div className="space-y-3">
@@ -101,42 +107,30 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                   ))}
                 </div>
               </div>
+              )}
 
-              {/* Historique des documents (avant fusion) */}
-              {(() => {
-                const allHistory = encaissements.flatMap(e => (e.documentHistory || []).map(h => ({ ...h, encaissementName: `${e.mode} ${e.year ? `(Année ${e.year})` : ''} - ${e.projectName}` })));
-                if (allHistory.length === 0) return null;
-                
-                allHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-                return (
-                  <div className="bg-slate-50 border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden mb-6">
-                    <div className="flex items-center gap-3 mb-6">
-                      <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
-                        <Banknote className="w-5 h-5 text-slate-400" />
-                      </div>
-                      <div>
-                        <h4 className="font-black text-slate-800 text-lg">Historique des documents</h4>
-                        <p className="text-xs font-bold text-slate-500">Documents générés avant ou pendant la fusion</p>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      {allHistory.map((history, idx) => (
-                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center shadow-sm">
-                          <div>
-                            <p className="text-sm font-bold text-slate-800">{history.documentType} - {history.action}</p>
-                            <p className="text-[10px] font-semibold text-slate-500 mt-1">{history.encaissementName}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[10px] font-bold text-slate-400 mb-1">{new Date(history.date).toLocaleString('fr-FR')}</p>
-                            <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-[9px] font-bold uppercase">{history.user}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
+              {/* Tabs */}
+              <div className="flex gap-4 border-b border-slate-200 mb-6 mt-4">
+                <button 
+                  onClick={() => setActiveTab('facturation')}
+                  className={cn(
+                    "pb-3 text-sm font-bold transition-all border-b-2",
+                    activeTab === 'facturation' ? "border-purple-500 text-purple-700" : "border-transparent text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  Facturation
+                </button>
+                <button 
+                  onClick={() => setActiveTab('documents')}
+                  className={cn(
+                    "pb-3 text-sm font-bold transition-all border-b-2",
+                    activeTab === 'documents' ? "border-purple-500 text-purple-700" : "border-transparent text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  Documents
+                </button>
+              </div>
 
               {/* Gestion des documents pour tout le dossier */}
               {(() => {
@@ -145,7 +139,8 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                 const enc = encaissements[0];
                 
                 return (
-                   <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
+                    <div key={enc.id} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden">
+                      {encaissements.length > 1 && (
                       <div className="bg-purple-50 border border-purple-200 flex flex-col items-center justify-center rounded-2xl p-6 mb-6 text-center">
                         <FolderKanban className="w-10 h-10 mb-3 text-purple-400" />
                         <h5 className="text-sm font-extrabold mb-2 text-purple-900">Gestion globale des documents</h5>
@@ -154,6 +149,7 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                           Le statut sera synchronisé pour tous les encaissements inclus.
                         </p>
                       </div>
+                      )}
                       
                       <div className="flex flex-col gap-3 mb-6">
                         {/* 1. PROFORMA */}
@@ -168,18 +164,20 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                         className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors"
                       >
                         <option value="PENDING">À générer</option>
+                        <option value="CANCELLED">À générer</option>
                         <option value="GENERATED">Générée</option>
-                        <option value="TO_VERIFY">À vérifier (DFC)</option>
+                        <option value="TO_VERIFY">Soumise à validation</option>
                         <option value="VALIDATED">Validée</option>
+                        <option value="DEPOSITED">Transmise</option>
                       </select>
                       <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
                         <button 
-                          onClick={() => setPreviewModalConfig({ isOpen: true, type: 'PROFORMA', encaissementId: enc.id, projectId: enc.projectId })}
+                          onClick={() => setPreviewModalConfig({ isOpen: true, type: 'PROFORMA', encaissementId: enc.id, projectId: enc.projectId, autoSave: enc.proforma.status === 'PENDING' || enc.proforma.status === 'CANCELLED' })}
                           className="px-5 py-2.5 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 rounded-xl text-xs font-bold transition-all"
                         >
-                          {enc.proforma.status === 'PENDING' ? 'Générer' : 'Ouvrir'}
+                          {(enc.proforma.status === 'PENDING' || enc.proforma.status === 'CANCELLED') ? 'Générer' : 'Ouvrir'}
                         </button>
-                        {enc.proforma.status !== 'PENDING' && (
+                        {(enc.proforma.status !== 'PENDING' && enc.proforma.status !== 'CANCELLED') && (
                           <button 
                             onClick={() => {
                               if (window.confirm("Voulez-vous vraiment réinitialiser cette proforma ?")) {
@@ -194,6 +192,46 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                       </div>
                     </div>
                     
+                    {activeTab === 'documents' && (
+                      <>
+                    {/* 1.b SOUMISSION */}
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                        <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">-</span>
+                        <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Soumission</span>
+                      </div>
+                      <select 
+                        value={enc.soumission?.status || 'PENDING'} 
+                        onChange={e => updateEncaissement(enc.projectId, enc.id, { soumission: { ...(enc.soumission || {}), status: e.target.value as any } })}
+                        className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors"
+                      >
+                        <option value="PENDING">À préparer</option>
+                        <option value="GENERATED">Préparée</option>
+                        <option value="VALIDATED">Déposée</option>
+                      </select>
+                    </div>
+
+                    {/* 1.c CONVENTION */}
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                        <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">-</span>
+                        <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Convention</span>
+                      </div>
+                      <select 
+                        value={enc.convention?.status || 'PENDING'} 
+                        onChange={e => updateEncaissement(enc.projectId, enc.id, { convention: { ...(enc.convention || {}), status: e.target.value as any } })}
+                        className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors"
+                      >
+                        <option value="PENDING">À préparer</option>
+                        <option value="GENERATED">Préparée</option>
+                        <option value="VALIDATED">Signée</option>
+                      </select>
+                    </div>
+                    </>
+                    )}
+                    
+                    {activeTab === 'facturation' && (
+                      <>
                     {/* 2. BON DE COMMANDE */}
                     <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
                       <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
@@ -245,7 +283,32 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                          )}
                       </div>
                     </div>
+                    </>
+                    )}
                     
+                    {activeTab === 'documents' && (
+                      <>
+                    {/* 2.b SERVICE FAIT */}
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                        <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">-</span>
+                        <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Service Fait</span>
+                      </div>
+                      <select 
+                        value={enc.serviceFait?.status || 'PENDING'} 
+                        onChange={e => updateEncaissement(enc.projectId, enc.id, { serviceFait: { ...(enc.serviceFait || {}), status: e.target.value as any } })}
+                        className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={enc.bc.status !== 'RECOVERED'}
+                      >
+                        <option value="PENDING">À récupérer</option>
+                        <option value="RECOVERED">Récupéré</option>
+                      </select>
+                    </div>
+                    </>
+                    )}
+                    
+                    {activeTab === 'facturation' && (
+                      <>
                     {/* 3. FACTURE */}
                     <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
                       <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
@@ -259,18 +322,21 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                         disabled={enc.bc.status !== 'RECOVERED'}
                       >
                         <option value="PENDING">À générer</option>
+                        <option value="CANCELLED">Annulée</option>
                         <option value="GENERATED">Générée</option>
-                        <option value="VALIDATED">Établie et envoyée</option>
+                        <option value="TO_VERIFY">Soumise à validation</option>
+                        <option value="VALIDATED">Validée</option>
+                        <option value="DEPOSITED">Transmise</option>
                       </select>
                       <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
                         <button 
-                          onClick={() => setPreviewModalConfig({ isOpen: true, type: 'FACTURE', encaissementId: enc.id, projectId: enc.projectId })}
+                          onClick={() => setPreviewModalConfig({ isOpen: true, type: 'FACTURE', encaissementId: enc.id, projectId: enc.projectId, autoSave: enc.facture.status === 'PENDING' || enc.facture.status === 'CANCELLED' })}
                           className="px-5 py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:pointer-events-none"
                           disabled={enc.bc.status !== 'RECOVERED'}
                         >
-                          {enc.facture.status === 'PENDING' ? 'Générer' : 'Ouvrir'}
+                          {(enc.facture.status === 'PENDING' || enc.facture.status === 'CANCELLED') ? 'Générer' : 'Ouvrir'}
                         </button>
-                        {enc.facture.status !== 'PENDING' && (
+                        {(enc.facture.status !== 'PENDING' && enc.facture.status !== 'CANCELLED') && (
                           <button 
                             onClick={() => {
                               if (window.confirm("Voulez-vous vraiment réinitialiser cette facture ?")) {
@@ -284,7 +350,32 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                         )}
                       </div>
                     </div>
+                    </>
+                    )}
                     
+                    {activeTab === 'documents' && (
+                      <>
+                    {/* 3.b ABE (Attestation de Bonne Exécution) */}
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
+                        <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-600">-</span>
+                        <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">ABE</span>
+                      </div>
+                      <select 
+                        value={enc.abe?.status || 'PENDING'} 
+                        onChange={e => updateEncaissement(enc.projectId, enc.id, { abe: { ...(enc.abe || {}), status: e.target.value as any } })}
+                        className="flex-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={enc.facture.status !== 'VALIDATED'}
+                      >
+                        <option value="PENDING">À récupérer</option>
+                        <option value="RECOVERED">Récupérée</option>
+                      </select>
+                    </div>
+                    </>
+                    )}
+                    
+                    {activeTab === 'facturation' && (
+                      <>
                     {/* 4. PAIEMENT */}
                     <div className="bg-blue-50/50 p-3.5 rounded-xl border border-blue-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4">
                       <div className="flex items-center gap-3 w-full sm:w-48 shrink-0">
@@ -331,6 +422,8 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                         )}
                       </div>
                     </div>
+                    </>
+                    )}
                   </div>
                     
                   {enc.resteDette ? (
@@ -346,7 +439,39 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
           )}
         </div>
         
-        <div className="flex justify-end pt-6 mt-4 border-t border-slate-100 gap-3">
+        <div className="flex justify-between items-center pt-6 mt-4 border-t border-slate-100">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Statut global du dossier :</span>
+            <button
+              onClick={() => {
+                const isDone = encaissements.every(e => e.status === 'DONE');
+                const newStatus = isDone ? 'IN_PROGRESS' : 'DONE';
+                encaissements.forEach(e => {
+                  updateEncaissement(e.projectId, e.id, { status: newStatus });
+                  if (newStatus === 'DONE' && e.mode === 'Maintenance') {
+                    generateMaintenanceEncaissement(e.projectId);
+                  }
+                });
+              }}
+              className={cn(
+                "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none",
+                encaissements.every(e => e.status === 'DONE') ? "bg-emerald-500" : "bg-slate-200"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                  encaissements.every(e => e.status === 'DONE') ? "translate-x-6" : "translate-x-1"
+                )}
+              />
+            </button>
+            <span className={cn(
+              "text-xs font-bold",
+              encaissements.every(e => e.status === 'DONE') ? "text-emerald-600" : "text-slate-500"
+            )}>
+              {encaissements.every(e => e.status === 'DONE') ? "Réglé" : "Non réglé"}
+            </span>
+          </div>
           <button type="button" onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Fermer</button>
         </div>
       </div>
@@ -363,38 +488,122 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
 
          if (!draft || !draft.items || draft.items.length === 0) {
             let totalHT = 0;
-            const items = encaissements.map(e => {
+            const items: { description: string, price: number }[] = [];
+            
+            // Smart fusion logic: Ignore AVANCE if TOTAL is present in the same dossier for the same contract
+            const validEncaissements = encaissements.filter(e => {
+               if (e.encaissementType === 'AVANCE' && e.contractId) {
+                  const hasTotal = encaissements.some(other => other.contractId === e.contractId && other.encaissementType === 'TOTAL');
+                  if (hasTotal) return false;
+               }
+               return true;
+            });
+
+            validEncaissements.forEach(e => {
+               const p = targetProject;
+               if (!p) return;
+               
                if (e.mode === 'Annexe') {
                  const price = e.annexePrice || 0;
                  totalHT += price;
-                 return {
+                 items.push({
                    description: e.annexeName || 'Prestation Annexe',
                    price
-                 };
+                 });
+                 return;
                }
 
-               const p = projects.find(pr => pr.id === e.projectId);
-               const prod = p?.product || e.product; // Fallback to e.product if not found
-               const vers = p?.version;
-               const price = getPrice(prod, vers, e.mode);
+               const prod = e.product || p.product || 'PAYE';
+               const vers = e.version || p.version;
+               
+               // For independent encaissements, we default to Acquisition base price for percentage calculations
+               const priceMode = (e.mode === 'Acquisition' || e.mode === 'Maintenance') ? e.mode : 'Acquisition';
+               const basePrice = getPrice(prod, vers, priceMode, client, p);
+               let price = basePrice;
+               
+               if (e.encaissementType === 'AVANCE') {
+                  const pct = e.percentage || 30;
+                  price = basePrice * (pct / 100);
+               } else if (e.encaissementType === 'TOTAL') {
+                  if (e.contractId) {
+                     // Deduct already paid advances for this contract
+                     const paidAvances = (p.encaissements || []).filter(other => 
+                        other.contractId === e.contractId && 
+                        other.encaissementType === 'AVANCE' && 
+                        other.status === 'DONE'
+                     );
+                     let totalPaid = 0;
+                     paidAvances.forEach(pa => {
+                        const paPct = pa.percentage || 30;
+                        totalPaid += basePrice * (paPct / 100);
+                     });
+                     price = Math.max(0, basePrice - totalPaid);
+                  }
+               } else if (e.mode === 'Indépendant') {
+                  // Fallback for independent without AVANCE
+                  price = basePrice; 
+               }
+
                totalHT += price;
                
+               const customDesignation = getDesignation(prod, vers, priceMode, client, p);
                const versionStr = vers ? `, Version ${vers}` : '';
                const title = `Logiciel ${prod}${versionStr}`;
-               const subtitle = e.mode === 'Acquisition' ? 'Acquisition' : `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
-               const description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle (Heures de bureau, Du Dimanche au Jeudi)\n• Télé-intervention annuelle (Heures de bureau, Du Dimanche au Jeudi)`.trim();
+               let subtitle = '';
+               if (e.mode === 'Acquisition') subtitle = 'Acquisition';
+               else if (e.mode === 'Maintenance') subtitle = `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
+               else if (e.mode === 'Indépendant') subtitle = e.title || 'Encaissement Indépendant';
                
-               return {
+               let description = '';
+               
+               if (customDesignation) {
+                  // If user defined a custom designation in Pricing rules, use it!
+                  description = customDesignation;
+                  if (e.encaissementType === 'AVANCE') {
+                     description += `\nAvance (${e.percentage || 30}%)`;
+                  } else if (e.encaissementType === 'TOTAL') {
+                     const paidAvances = e.contractId ? (p.encaissements || []).filter(other => other.contractId === e.contractId && other.encaissementType === 'AVANCE' && other.status === 'DONE') : [];
+                     if (paidAvances.length > 0) {
+                        description += `\nSolde (Déduction des avances)`;
+                     }
+                  }
+               } else {
+                  // Fallback to old default generated text
+                  if (e.encaissementType === 'AVANCE') {
+                     description = `${title}\n${subtitle} - Avance (${e.percentage || 30}%)`;
+                  } else if (e.encaissementType === 'TOTAL') {
+                     const paidAvances = e.contractId ? (p.encaissements || []).filter(other => other.contractId === e.contractId && other.encaissementType === 'AVANCE' && other.status === 'DONE') : [];
+                     if (paidAvances.length > 0) {
+                        description = `${title}\n${subtitle} - Solde (Déduction des avances)`;
+                     } else {
+                        description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle\n• Télé-intervention annuelle`.trim();
+                     }
+                  } else {
+                     description = `${title}\n${subtitle}`;
+                  }
+               }
+
+               if (basePrice === 0) {
+                  const prodConfig = useStore.getState().products.find(p => p.name.toLowerCase() === prod.toLowerCase());
+                  description += `\n\n[ERREUR PRIX: 0 DA] Vérifiez la Règle Tarifaire.\nProduit cherché: '${prod}' (Version: '${vers}').\nEntité projet: '${p.entity}'.\nClient: Effectif=${client.effectif}, Type=${client.effectifType}.`;
+                  if (prodConfig) {
+                    description += `\nRègles trouvées pour ce produit : ${prodConfig.pricingRules.length}\nVeuillez vérifier qu'une des règles correspond EXACTEMENT à ces critères.`;
+                  } else {
+                    description += `\nLe produit '${prod}' n'a pas été trouvé dans la liste des produits dynamiques.`;
+                  }
+               }
+               
+               items.push({
                  description,
                  price
-               };
+               });
             });
 
             const totalTVA = totalHT * 0.19;
             const totalTTC = totalHT + totalTVA;
 
             draft = {
-              documentNumber: `${previewModalConfig.type === 'PROFORMA' ? 'PF' : 'FA'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`,
+              documentNumber: useStore.getState().getNextDocumentNumber(previewModalConfig.type),
               items,
               totalHT,
               totalTVA,
@@ -415,18 +624,19 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                status={previewModalConfig.readOnlyStatus || (docStatus === 'PENDING' ? 'GENERATED' : docStatus)}
                isReadOnly={previewModalConfig.isReadOnly}
                onClose={() => setPreviewModalConfig({ isOpen: false, type: 'PROFORMA' })}
-               onSaveDraft={(updatedDraft) => {
+               autoSave={previewModalConfig.autoSave}
+               onSaveDraft={(updatedDraft, actionLabel) => {
                   const currentUser = auth.currentUser;
                   const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
                   
                   if (previewModalConfig.type === 'PROFORMA') {
-                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Brouillon généré/enregistré', draftSnapshot: updatedDraft, user: userName }];
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: actionLabel || 'Brouillon mis à jour', draftSnapshot: updatedDraft, user: userName }];
                      updateEncaissement(targetProject.id, targetEnc.id, { 
                         proforma: { ...targetEnc.proforma, status: 'GENERATED', draft: updatedDraft },
                         documentHistory: newHistory
                      });
                   } else {
-                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Brouillon généré/enregistré', draftSnapshot: updatedDraft, user: userName }];
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: actionLabel || 'Brouillon mis à jour', draftSnapshot: updatedDraft, user: userName }];
                      updateEncaissement(targetProject.id, targetEnc.id, { 
                         facture: { ...targetEnc.facture, status: 'GENERATED', draft: updatedDraft },
                         documentHistory: newHistory
@@ -434,22 +644,54 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                   }
                }}
                onSubmitValidation={() => {
+                  const currentUser = auth.currentUser;
+                  const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
                   if (previewModalConfig.type === 'PROFORMA') {
-                     updateEncaissement(targetProject.id, targetEnc.id, { proforma: { ...targetEnc.proforma, status: 'TO_VERIFY' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Soumise à validation', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        proforma: { ...targetEnc.proforma, status: 'TO_VERIFY' },
+                        documentHistory: newHistory
+                     });
                   } else {
-                     updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'TO_VERIFY' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Soumise à validation', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        facture: { ...targetEnc.facture, status: 'TO_VERIFY' },
+                        documentHistory: newHistory
+                     });
                   }
                }}
                onValidate={() => {
+                  const currentUser = auth.currentUser;
+                  const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
                   if (previewModalConfig.type === 'PROFORMA') {
-                     updateEncaissement(targetProject.id, targetEnc.id, { proforma: { ...targetEnc.proforma, status: 'VALIDATED' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Validée', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        proforma: { ...targetEnc.proforma, status: 'VALIDATED' },
+                        documentHistory: newHistory
+                     });
                   } else {
-                     updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'VALIDATED' } });
+                     const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Validée', user: userName }];
+                     updateEncaissement(targetProject.id, targetEnc.id, { 
+                        facture: { ...targetEnc.facture, status: 'VALIDATED' },
+                        documentHistory: newHistory
+                     });
                   }
                }}
                onDeposit={() => {
-                 if (previewModalConfig.type === 'FACTURE') {
-                    updateEncaissement(targetProject.id, targetEnc.id, { facture: { ...targetEnc.facture, status: 'VALIDATED' } });
+                 const currentUser = auth.currentUser;
+                 const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
+                 if (previewModalConfig.type === 'PROFORMA') {
+                    const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'PROFORMA' as const, action: 'Transmise', user: userName }];
+                    updateEncaissement(targetProject.id, targetEnc.id, { 
+                       proforma: { ...targetEnc.proforma, status: 'DEPOSITED' },
+                       documentHistory: newHistory
+                    });
+                 } else {
+                    const newHistory = [...(targetEnc.documentHistory || []), { id: uuidv4(), date: new Date().toISOString(), documentType: 'FACTURE' as const, action: 'Transmise', user: userName }];
+                    updateEncaissement(targetProject.id, targetEnc.id, { 
+                       facture: { ...targetEnc.facture, status: 'DEPOSITED' },
+                       documentHistory: newHistory
+                    });
                  }
                }}
             />

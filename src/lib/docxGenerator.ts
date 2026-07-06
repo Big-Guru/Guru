@@ -3,7 +3,7 @@ import Docxtemplater from 'docxtemplater';
 import { saveAs } from 'file-saver';
 import writtenNumber from 'written-number';
 import { Client, Project, EncaissementRecord, DocumentDraft } from '../types';
-import { getPrice } from './pricing';
+import { getPrice, getDesignation } from './pricing';
 
 // Configure written-number
 writtenNumber.defaults.lang = 'fr';
@@ -59,7 +59,10 @@ export const generateWordDocument = async (
     });
 
     // 4. Utiliser les prix du brouillon si disponibles, sinon calculer par défaut
-    const prixHT = draft ? draft.totalHT : getPrice(project.product, project.version, encaissement.mode);
+    const encProduct = encaissement.product || project.product;
+    const encVersion = encaissement.version || project.version;
+    const prixHT = draft ? draft.totalHT : getPrice(encProduct, encVersion, encaissement.mode, client, project);
+    const designation = getDesignation(encProduct, encVersion, encaissement.mode, client, project);
     const tva = draft ? draft.totalTVA : (prixHT * 0.19);
     const prixTTC = draft ? draft.totalTTC : (prixHT + tva);
 
@@ -76,17 +79,19 @@ export const generateWordDocument = async (
       client_rc: client.rc || '',
       client_ai: client.ai || '',
       project_name: project.name,
-      product: project.product,
-      version: project.version || '',
+      product: encProduct,
+      version: encVersion || '',
       encaissement_mode: encaissement.mode,
       encaissement_annee: anneeTexte,
+      designation: designation,
+      description: designation,
       prix_ht: formatCurrency(prixHT),
       tva: formatCurrency(tva),
       prix_ttc: formatCurrency(prixTTC),
       prix_ttc_lettres: `${writtenNumber(Math.floor(prixTTC))} dinars algériens${(prixTTC % 1) > 0 ? ` et ${Math.round((prixTTC % 1) * 100)} centimes` : ''}`.replace(/^\w/, (c) => c.toUpperCase()),
       date: new Date().toLocaleDateString('fr-FR'),
       // Add items array for dynamic multi-line looping in the Word file
-      items: draft ? draft.items.map((item, i) => ({
+      items: draft && draft.items.length > 0 ? draft.items.map((item, i) => ({
         index: String(i + 1).padStart(2, '0'),
         qty: '01',
         description: item.description,
@@ -94,7 +99,7 @@ export const generateWordDocument = async (
       })) : [{
         index: '01',
         qty: '01',
-        description: `${project.product} ${project.version || ''} - ${encaissement.mode}`,
+        description: designation,
         price: formatCurrency(prixHT)
       }]
     });

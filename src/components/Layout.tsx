@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { Home, Users, Briefcase, Bell, LogOut, Menu, X, Map, ChevronLeft, ChevronRight, Banknote, FileText } from 'lucide-react';
+import { Home, Users, Briefcase, Bell, LogOut, Menu, X, Map, ChevronLeft, ChevronRight, Banknote, FileText, Package } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store';
 import { calculateAlerts } from '../lib/alerts';
@@ -36,6 +36,7 @@ export default function Layout() {
     { to: '/encaissements', icon: Banknote, label: 'Encaissements' },
     { to: '/facturation', icon: FileText, label: 'Facturation' },
     { to: '/missions', icon: Map, label: 'Missions' },
+    { to: '/products', icon: Package, label: 'Produits' },
   ];
 
   const handleLogout = () => {

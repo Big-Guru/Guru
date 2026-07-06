@@ -18,16 +18,13 @@ export default function AlertsList() {
     const activeEncaissementsList = p.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
     
     activeEncaissementsList.forEach(enc => {
-      if (enc.mode === 'Acquisition') {
-        if (acquisitionContract && encaissementPhase) {
-           missingDocs += (encaissementPhase.tasks || []).filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS').length;
-        }
-      } else if (enc.mode === 'Maintenance') {
-         if (enc.proforma?.status === 'PENDING') missingDocs++;
-         if (enc.bc?.status === 'PENDING') missingDocs++;
-         if (enc.facture?.status === 'PENDING') missingDocs++;
-         if (enc.status !== 'DONE') missingDocs++;
-      }
+      if (enc.soumission?.status !== 'VALIDATED') missingDocs++;
+      if (enc.convention?.status !== 'VALIDATED') missingDocs++;
+      if (enc.proforma?.status !== 'VALIDATED') missingDocs++;
+      if (enc.bc?.status !== 'RECOVERED') missingDocs++;
+      if (enc.serviceFait?.status !== 'RECOVERED') missingDocs++;
+      if (enc.facture?.status !== 'VALIDATED') missingDocs++;
+      if (enc.abe?.status !== 'RECOVERED') missingDocs++;
     });
 
     return {
@@ -136,50 +133,54 @@ export default function AlertsList() {
             <div className="flex-1 overflow-y-auto pr-2 space-y-8">
               <div className="space-y-4">
                 {activeEncaissementsList.map(enc => {
-                  let contractDocs: { id: string, name: string, isMissing: boolean, onToggle: () => void }[] = [];
                   let contractTitle: string = enc.mode;
-                  
-                  if (enc.mode === 'Acquisition') {
-                    if (acquisitionContract && encaissementPhase) {
-                       contractDocs = (encaissementPhase.tasks || []).map(t => ({
-                          id: t.id,
-                          name: t.name,
-                          isMissing: t.status === 'PENDING' || t.status === 'IN_PROGRESS',
-                          onToggle: () => {
-                             const newStatus = (t.status === 'PENDING' || t.status === 'IN_PROGRESS') ? 'DONE' : 'PENDING';
-                             updateTaskInContract(project.id, acquisitionContract.id, encaissementPhase.id, t.id, { status: newStatus as any });
-                          }
-                       }));
+                  if (enc.mode === 'Maintenance') contractTitle = enc.year !== undefined ? `Maintenance (Année ${enc.year})` : 'Maintenance';
+                  if (enc.title) contractTitle += ` - ${enc.title}`;
+
+                  let contractDocs = [
+                    {
+                      id: 'soumission',
+                      name: 'Soumission',
+                      isMissing: enc.soumission?.status !== 'VALIDATED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { soumission: { ...(enc.soumission || {}), status: enc.soumission?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                    },
+                    {
+                      id: 'convention',
+                      name: 'Convention',
+                      isMissing: enc.convention?.status !== 'VALIDATED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { convention: { ...(enc.convention || {}), status: enc.convention?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                    },
+                    {
+                      id: 'proforma',
+                      name: 'Proforma',
+                      isMissing: enc.proforma?.status !== 'VALIDATED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                    },
+                    {
+                      id: 'bc',
+                      name: 'Bon de Commande',
+                      isMissing: enc.bc?.status !== 'RECOVERED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: enc.bc?.status !== 'RECOVERED' ? 'RECOVERED' : 'PENDING' } as any })
+                    },
+                    {
+                      id: 'service_fait',
+                      name: 'Service fait',
+                      isMissing: enc.serviceFait?.status !== 'RECOVERED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { serviceFait: { ...(enc.serviceFait || {}), status: enc.serviceFait?.status !== 'RECOVERED' ? 'RECOVERED' : 'PENDING' } as any })
+                    },
+                    {
+                      id: 'facture',
+                      name: 'Facture définitive',
+                      isMissing: enc.facture?.status !== 'VALIDATED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                    },
+                    {
+                      id: 'abe',
+                      name: 'ABE',
+                      isMissing: enc.abe?.status !== 'RECOVERED',
+                      onToggle: () => updateEncaissement(project.id, enc.id, { abe: { ...(enc.abe || {}), status: enc.abe?.status !== 'RECOVERED' ? 'RECOVERED' : 'PENDING' } as any })
                     }
-                  } else if (enc.mode === 'Maintenance') {
-                    contractTitle = enc.year !== undefined ? `Maintenance (Année ${enc.year})` : 'Maintenance';
-                    contractDocs = [
-                      {
-                        id: 'proforma',
-                        name: 'Proforma',
-                        isMissing: enc.proforma?.status === 'PENDING',
-                        onToggle: () => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
-                      },
-                      {
-                        id: 'bc',
-                        name: 'Bon de Commande',
-                        isMissing: enc.bc?.status === 'PENDING',
-                        onToggle: () => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: enc.bc?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
-                      },
-                      {
-                        id: 'facture',
-                        name: 'Facture définitive',
-                        isMissing: enc.facture?.status === 'PENDING',
-                        onToggle: () => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
-                      },
-                      {
-                        id: 'service_fait',
-                        name: 'Service fait',
-                        isMissing: enc.status !== 'DONE',
-                        onToggle: () => updateEncaissement(project.id, enc.id, { status: enc.status !== 'DONE' ? 'DONE' : 'IN_PROGRESS' })
-                      }
-                    ];
-                  }
+                  ];
 
                   const missingCount = contractDocs.filter(d => d.isMissing).length;
 

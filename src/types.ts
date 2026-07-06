@@ -8,7 +8,7 @@ export interface DocumentTrack {
   dateRecup?: string;
 }
 
-export type InvoicingStepStatus = 'PENDING' | 'GENERATED' | 'TO_VERIFY' | 'VALIDATED' | 'DEPOSITED' | 'RECOVERED';
+export type InvoicingStepStatus = 'PENDING' | 'GENERATED' | 'TO_VERIFY' | 'VALIDATED' | 'DEPOSITED' | 'RECOVERED' | 'CANCELLED';
 
 export interface DocumentDraft {
   documentNumber: string;
@@ -33,7 +33,7 @@ export interface InvoicingStep {
 export interface DocumentHistoryEvent {
   id: string;
   date: string;
-  documentType: 'PROFORMA' | 'FACTURE' | 'BC';
+  documentType: 'PROFORMA' | 'FACTURE' | 'BC' | 'SOUMISSION' | 'CONVENTION' | 'SERVICE_FAIT' | 'ABE';
   action: string;
   draftSnapshot?: DocumentDraft;
   user?: string;
@@ -42,15 +42,21 @@ export interface DocumentHistoryEvent {
 export interface EncaissementRecord {
   id: string;
   projectId: string;
-  mode: 'Acquisition' | 'Maintenance' | 'Annexe';
+  mode: 'Acquisition' | 'Maintenance' | 'Annexe' | 'Indépendant' | 'Standard';
+  title?: string;
   annexeName?: string;
   annexePrice?: number;
+  percentage?: number; // Pour les avances
   year?: number; // Seulement pour la Maintenance
   targetDate: string; // YYYY-MM-DD
   status: 'UPCOMING' | 'IN_PROGRESS' | 'DONE' | 'PARTIAL';
   
   proforma: InvoicingStep;
+  soumission?: InvoicingStep;
+  convention?: InvoicingStep;
   bc: InvoicingStep;
+  serviceFait?: InvoicingStep;
+  abe?: InvoicingStep;
   facture: InvoicingStep;
   
   montantTotal?: number;
@@ -60,6 +66,13 @@ export interface EncaissementRecord {
   isCombined?: boolean;
   combinedWithDossierId?: string;
   documentHistory?: DocumentHistoryEvent[];
+  
+  // New Architecture Fields
+  contractId?: string;
+  encaissementType?: 'AVANCE' | 'TOTAL';
+  billingMode?: 'FACTURE' | 'PARTIEL';
+  product?: string;
+  version?: ProductVersion;
   
   // Facturation Fields
   potentiel?: 'Faible' | 'Moyen' | 'Réalisé';
@@ -92,7 +105,7 @@ export interface Client {
   address: string;
   wilaya: string;
   effectif: number;
-  effectifType: 'SALARIES' | 'ETUDIANTS';
+  effectifType: 'UNIVERSITE' | 'EH_DA';
   nif: string;
   nis: string;
   rc: string; // Registre commerce or Agrément
@@ -102,6 +115,28 @@ export interface Client {
 export type ProductType = 'PAYE' | 'BUDGET' | 'BUDGET_APC' | 'STOCKS' | 'GRH' | 'PHARMATIS' | 'GBS';
 export type ProductVersion = 'ULTRALIGHT' | 'LIGHT' | 'INTERMEDIATE' | 'ADVANCED' | 'GLOBAL';
 export type ProcessType = 'STANDARD' | 'DIRECT_MAINTENANCE' | 'MAINTENANCE_ONLY';
+
+export interface PricingRule {
+  id: string;
+  entity: 'Naltis' | 'Netsprint' | 'MP';
+  effectifMin: number;
+  effectifMax: number;
+  effectifType: 'UNIVERSITE' | 'EH_DA';
+  version: ProductVersion;
+  designation?: string;
+  acquisitionPrice: number;
+  maintenancePrice: number;
+}
+
+export interface ProductConfig {
+  id: string;
+  ownerId?: string;
+  name: string;
+  departement: 'D1' | 'D2';
+  defaultEntity: 'Naltis' | 'Netsprint' | 'MP';
+  maintenancePeriodicity: 'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle';
+  pricingRules: PricingRule[];
+}
 
 export interface MaintenanceInfo {
   id: string;
@@ -188,6 +223,7 @@ export interface Project {
   phase?: 'Démarchage' | 'Adaptation' | 'Encaissement' | 'Recouvrement';
   status?: 'Actif' | 'Effectué' | 'Suspendu' | 'Abandonné';
   createdAt?: string;
+  maintenancePeriodicity?: 'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle';
 
   // Embedded Entities
   contracts?: Contract[];

@@ -29,7 +29,7 @@ export default function ClientForm() {
     address: '',
     wilaya: '',
     effectif: 0,
-    effectifType: 'SALARIES' as 'SALARIES' | 'ETUDIANTS',
+    effectifType: 'UNIVERSITE' as 'UNIVERSITE' | 'EH_DA',
     nif: '',
     nis: '',
     rc: '',
@@ -45,7 +45,7 @@ export default function ClientForm() {
           address: client.address || '',
           wilaya: client.wilaya || '',
           effectif: client.effectif || 0,
-          effectifType: client.effectifType || 'SALARIES',
+          effectifType: client.effectifType || 'UNIVERSITE',
           nif: client.nif || '',
           nis: client.nis || '',
           rc: client.rc || '',
@@ -131,17 +131,18 @@ export default function ClientForm() {
                   onChange={e => setFormData({ ...formData, effectif: parseInt(e.target.value) || 0 })}
                 />
              </div>
-             <div>
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">Type d'effectif</label>
-                <select 
-                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Type</label>
+                <select
+                  required
+                  className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 block p-3.5 transition-all outline-none"
                   value={formData.effectifType}
                   onChange={e => setFormData({ ...formData, effectifType: e.target.value as any })}
                 >
-                  <option value="SALARIES">Salariés</option>
-                  <option value="ETUDIANTS">Étudiants</option>
+                  <option value="UNIVERSITE">Université</option>
+                  <option value="EH_DA">EH/DA</option>
                 </select>
-             </div>
+              </div>
           </div>
         </div>
 

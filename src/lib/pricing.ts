@@ -1,54 +1,77 @@
-import { ProductType, ProductVersion } from '../types';
+import { ProductType, ProductVersion, Client, Project } from '../types';
+import { useStore } from '../store';
 
-interface PriceData {
-  acquisition: number;
-  maintenance: number;
-}
+/**
+ * Récupère le prix HT dynamiquement basé sur les règles de produit
+ */
+export const getMatchingRule = (
+  productName: string, 
+  version: string | undefined, 
+  client?: Client,
+  project?: Project
+) => {
+  if (!version || !client || !project) return null;
+  
+  const products = useStore.getState().products;
+  const prodConfig = products.find(p => p.name.toLowerCase() === productName.toLowerCase());
+  if (!prodConfig) return null;
 
-// Matrice des prix HT (en DZD)
-export const PRICING_MATRIX: Record<ProductType, Partial<Record<ProductVersion, PriceData>>> = {
-  BUDGET: {
-    ULTRALIGHT: { acquisition: 244000, maintenance: 48000 },
-    LIGHT: { acquisition: 495000, maintenance: 98000 },
-    INTERMEDIATE: { acquisition: 696000, maintenance: 137000 },
-    ADVANCED: { acquisition: 997000, maintenance: 197000 },
-    GLOBAL: { acquisition: 1698000, maintenance: 335000 },
-  },
-  PAYE: {
-    ULTRALIGHT: { acquisition: 242000, maintenance: 47000 },
-    LIGHT: { acquisition: 493000, maintenance: 97000 },
-    INTERMEDIATE: { acquisition: 694000, maintenance: 137000 },
-    ADVANCED: { acquisition: 995000, maintenance: 196000 },
-    GLOBAL: { acquisition: 1695000, maintenance: 334000 },
-  },
-  BUDGET_APC: {},
-  STOCKS: {},
-  GRH: {},
-  PHARMATIS: {},
-  GBS: {}
+  return prodConfig.pricingRules.find(r => {
+    let normalizedClientType = client.effectifType;
+    if (normalizedClientType === 'SALARIES' || normalizedClientType === 'POSTES') normalizedClientType = 'UNIVERSITE' as any;
+    if (normalizedClientType === 'ETUDIANTS') normalizedClientType = 'EH_DA' as any;
+
+    const clientEffectif = Number(client.effectif) || 0;
+
+    return r.version === version &&
+      r.entity === project.entity &&
+      r.effectifType === normalizedClientType &&
+      clientEffectif >= r.effectifMin &&
+      clientEffectif <= r.effectifMax;
+  }) || null;
 };
 
 /**
- * Récupère le prix HT pour un encaissement donné.
+ * Récupère le prix HT dynamiquement basé sur les règles de produit
  */
 export const getPrice = (
-  product: ProductType, 
-  version: ProductVersion | undefined, 
-  mode: 'Acquisition' | 'Maintenance' | string
+  productName: string, 
+  version: string | undefined, 
+  mode: string,
+  client?: Client,
+  project?: Project
 ): number => {
-  if (!version) return 0;
-  
-  const productPricing = PRICING_MATRIX[product];
-  if (!productPricing) return 0;
+  const rule = getMatchingRule(productName, version, client, project);
 
-  const versionPricing = productPricing[version];
-  if (!versionPricing) return 0;
+  if (!rule) {
+    console.log('[getPrice] No matching rule found for:', {
+      productName, version, entity: project?.entity, effectifType: client?.effectifType, effectif: client?.effectif
+    });
+    return 0;
+  }
 
-  if (mode === 'Acquisition') {
-    return versionPricing.acquisition;
-  } else if (mode.includes('Maintenance')) {
-    return versionPricing.maintenance;
+  console.log('[getPrice] Matched rule:', rule, 'Mode:', mode);
+
+  const normalizedMode = mode.toLowerCase();
+  if (normalizedMode === 'acquisition') {
+    return rule.acquisitionPrice;
+  } else if (normalizedMode.includes('maintenance')) {
+    return rule.maintenancePrice;
   }
   
   return 0;
+};
+
+/**
+ * Récupère la désignation dynamique basée sur les règles de produit
+ */
+export const getDesignation = (
+  productName: string, 
+  version: string | undefined, 
+  mode: string,
+  client?: Client,
+  project?: Project
+): string | null => {
+  const rule = getMatchingRule(productName, version, client, project);
+  return rule?.designation || null;
 };

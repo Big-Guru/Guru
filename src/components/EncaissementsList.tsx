@@ -20,7 +20,7 @@ export default function EncaissementsList() {
       ...e,
       projectId: p.id,
       projectName: p.name,
-      product: p.product.name,
+      product: p.product,
       client: clients.find(c => c.id === p.clientId)
     }))
   ).filter(e => {
@@ -106,7 +106,7 @@ export default function EncaissementsList() {
                    </div>
                    <div className="flex-1">
                      <h3 className="text-base font-extrabold text-indigo-900 tracking-tight">Opportunité de Fusion : {client.name} !</h3>
-                     <p className="text-indigo-600/80 text-xs font-bold mt-0.5 leading-relaxed">Le client a {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({Array.from(new Set(group.map((g: any) => g.product))).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
+                     <p className="text-indigo-600/80 text-xs font-bold mt-0.5 leading-relaxed">Le client a {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({Array.from(new Set(group.map((g: any) => `${g.product} - ${g.mode}`))).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
                    </div>
                 </div>
                 <Link 

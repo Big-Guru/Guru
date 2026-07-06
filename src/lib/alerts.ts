@@ -31,38 +31,31 @@ export function calculateAlerts(project: Project): Alert[] {
     }
   }
 
-  // Missing Documents from Encaissements (New Logic)
-  const acquisitionContract = project.contracts?.find(c => c.mode === 'Acquisition');
-  const encaissementPhase = acquisitionContract?.phases?.find(ph => ph.name === 'Encaissement');
-  const activeEncaissementsList = project.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
-  
-  activeEncaissementsList.forEach(enc => {
-    if (enc.mode === 'Acquisition') {
-      if (acquisitionContract && encaissementPhase) {
-         (encaissementPhase.tasks || []).filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS').forEach(t => {
-            alerts.push({
-              id: uuidv4(),
-              projectId: project.id,
-              level: 'CRITICAL',
-              message: `Document d'acquisition manquant : ${t.name}`,
-              documentType: 'ENC_ACQ'
-            });
-         });
-      }
-    } else if (enc.mode === 'Maintenance') {
-       const yearText = enc.year !== undefined ? `Année ${enc.year}` : '';
-       if (enc.proforma?.status === 'PENDING') {
-          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Proforma de maintenance manquante (${yearText})`, documentType: 'PROFORMA_MAIN' });
-       }
-       if (enc.bc?.status === 'PENDING') {
-          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Bon de Commande manquant (${yearText})`, documentType: 'BC_MAIN' });
-       }
-       if (enc.facture?.status === 'PENDING') {
-          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Facture définitive manquante (${yearText})`, documentType: 'FACT_MAIN' });
-       }
-       if (enc.status !== 'DONE') {
-          alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Service Fait manquant (${yearText})`, documentType: 'ENC_MAIN' });
-       }
+  // Exact match to ProjectDetails.tsx missingDocsCount logic
+  const activeEncaissements = (project.encaissements || []).filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED');
+  activeEncaissements.forEach(enc => {
+    const contextText = enc.year !== undefined ? `${enc.mode} - Année ${enc.year}` : enc.mode;
+    
+    if (enc.soumission?.status !== 'VALIDATED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Soumission non validée (${contextText})`, documentType: 'DOC_MISSING' });
+    }
+    if (enc.convention?.status !== 'VALIDATED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Convention non validée (${contextText})`, documentType: 'DOC_MISSING' });
+    }
+    if (enc.proforma?.status !== 'VALIDATED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Proforma non validée (${contextText})`, documentType: 'DOC_MISSING' });
+    }
+    if (enc.bc?.status !== 'RECOVERED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Bon de Commande non récupéré (${contextText})`, documentType: 'DOC_MISSING' });
+    }
+    if (enc.serviceFait?.status !== 'RECOVERED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Service Fait non récupéré (${contextText})`, documentType: 'DOC_MISSING' });
+    }
+    if (enc.facture?.status !== 'VALIDATED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `Facture définitive non validée (${contextText})`, documentType: 'DOC_MISSING' });
+    }
+    if (enc.abe?.status !== 'RECOVERED') {
+      alerts.push({ id: uuidv4(), projectId: project.id, level: 'CRITICAL', message: `ABE non récupérée (${contextText})`, documentType: 'DOC_MISSING' });
     }
   });
 

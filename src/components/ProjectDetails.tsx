@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store';
 import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power, PowerOff } from 'lucide-react';
-import { ProjectTask, Contract, ProjectContact, DocumentTrack, DocumentDraft } from '../types';
+import { v4 as uuidv4 } from 'uuid';
+import { ProjectTask, Contract, ProjectContact, DocumentTrack, DocumentDraft, ProductVersion } from '../types';
 import { generateWordDocument } from '../lib/docxGenerator';
 import { getPrice } from '../lib/pricing';
 import DocumentPreviewModal from './DocumentPreviewModal';
@@ -31,8 +32,8 @@ export default function ProjectDetails() {
     updateProject,
     deleteProject,
     addContract,
-    addAnnexeContract,
-    deleteAnnexeContract,
+    addCustomContract,
+    deleteCustomContract,
     updateContractStatus,
     updateTaskInContract,
     togglePhaseStatus,
@@ -47,7 +48,8 @@ export default function ProjectDetails() {
     addDocumentHistoryEvent,
     addDossierPaiement,
     updateDossierPaiement,
-    dossiersPaiement
+    dossiersPaiement,
+    products
   } = useStore();
 
   const project = projects.find(p => p.id === id);
@@ -59,7 +61,9 @@ export default function ProjectDetails() {
   const [showNewTask, setShowNewTask] = useState(false);
   const [showEditProject, setShowEditProject] = useState(false);
   const [showContractManager, setShowContractManager] = useState(false);
+  const [contractModalTab, setContractModalTab] = useState<'production' | 'encaissement'>('production');
   const [showFacturation, setShowFacturation] = useState<boolean | string>(false);
+  const [dossierToDissociate, setDossierToDissociate] = useState<string | null>(null);
   const [selectedMergeCandidate, setSelectedMergeCandidate] = useState<string>('none');
   const [previewModalConfig, setPreviewModalConfig] = useState<{
     isOpen: boolean;
@@ -171,7 +175,7 @@ export default function ProjectDetails() {
     let needsFix = false;
     const updatedContracts = project.contracts.map(c => {
       if (c.mode === 'Maintenance') {
-        const match = c.name.match(/Année (\d+)/);
+        const match = c.name.match(/\d+/);
         const year = match ? parseInt(match[1], 10) : 1;
 
         const maintEnc = project.encaissements?.find(e => e.mode === 'Maintenance' && e.year === year);
@@ -208,14 +212,81 @@ export default function ProjectDetails() {
     }
   }, [project, updateProject]);
 
-  const [newContractName, setNewContractName] = useState('');
-  const [newContractMode, setNewContractMode] = useState('Acquisition');
-  const [newContractPhase, setNewContractPhase] = useState('Démarchage');
+  const handleFuseDossiers = async () => {
+    const encaissementsToFuse: any[] = [];
+    manualFusionSelection.forEach(card => {
+      if (card.isEncaissementCard) {
+        if (card.status !== 'DONE') {
+          encaissementsToFuse.push(card);
+        }
+      } else {
+        const activeEnc = (project.encaissements || []).filter(e => e.contractId === card.id && e.status !== 'DONE');
+        encaissementsToFuse.push(...activeEnc);
+      }
+    });
 
-  const [showNewAnnexeModal, setShowNewAnnexeModal] = useState(false);
-  const [newAnnexeName, setNewAnnexeName] = useState('');
-  const [newAnnexePrice, setNewAnnexePrice] = useState('');
-  const [newAnnexeAttachedContractId, setNewAnnexeAttachedContractId] = useState('');
+    if (encaissementsToFuse.length < 2) {
+      alert("La fusion nécessite au moins 2 encaissements non réglés parmi les cartes sélectionnées.");
+      return;
+    }
+
+    const newId = await addDossierPaiement({
+      clientId: client.id,
+      projectIds: [project.id],
+      encaissementIds: encaissementsToFuse.map(e => e.id),
+      status: 'DRAFT',
+      total: 0,
+      encaisse: 0
+    });
+
+    if (newId) {
+      const updatedEncaissements = (project.encaissements || []).map(enc => {
+        if (encaissementsToFuse.some(e => e.id === enc.id)) {
+          return { 
+            ...enc, 
+            isCombined: true, 
+            combinedWithDossierId: newId,
+            proforma: { status: 'CANCELLED' as const },
+            soumission: { status: 'CANCELLED' as const },
+            convention: { status: 'CANCELLED' as const },
+            bc: { status: 'CANCELLED' as const },
+            serviceFait: { status: 'CANCELLED' as const },
+            abe: { status: 'CANCELLED' as const },
+            facture: { status: 'CANCELLED' as const },
+            documentHistory: [
+              ...(enc.documentHistory || []),
+              {
+                id: crypto.randomUUID(),
+                date: new Date().toISOString(),
+                documentType: 'PROFORMA',
+                action: 'Facturation individuelle annulée (Fusion de dossiers)',
+                user: 'Système'
+              }
+            ]
+          };
+        }
+        return enc;
+      });
+      updateProject(project.id, { encaissements: updatedEncaissements });
+    }
+    setManualFusionSelection([]);
+  };
+
+  const [showNewContractModal, setShowNewContractModal] = useState(false);
+  const [newContractName, setNewContractName] = useState('');
+  const [newContractPrice, setNewContractPrice] = useState('');
+
+  const [showNewEncaissementModal, setShowNewEncaissementModal] = useState(false);
+  const [newEncaissementType, setNewEncaissementType] = useState<'AVANCE' | 'TOTAL'>('AVANCE');
+  const [newEncaissementBillingMode, setNewEncaissementBillingMode] = useState<'FACTURE' | 'PARTIEL'>('FACTURE');
+  const [newEncaissementTargetDate, setNewEncaissementTargetDate] = useState('');
+  const [newEncaissementIsLinked, setNewEncaissementIsLinked] = useState<boolean>(true);
+  const [newEncaissementTitle, setNewEncaissementTitle] = useState('');
+  const [newEncaissementContractId, setNewEncaissementContractId] = useState<string>('');
+  const [newEncaissementPercentage, setNewEncaissementPercentage] = useState<number>(30);
+  const [newEncaissementProduct, setNewEncaissementProduct] = useState(project?.product || '');
+  const [newEncaissementVersion, setNewEncaissementVersion] = useState<ProductVersion | ''>(project?.version || '');
+
 
   const [newTaskName, setNewTaskName] = useState('');
   const [newTaskDate, setNewTaskDate] = useState('');
@@ -386,16 +457,9 @@ export default function ProjectDetails() {
     setShowEditProject(false);
   };
 
-  const advancePhase = () => {
-    if (!currentContract) return;
-    const targetPhaseId = activePhaseId || currentContract.phases?.[0]?.id;
-    if (!targetPhaseId) return;
-    advanceProjectPhase(project.id, currentContract.id, targetPhaseId);
-  };
-
   return (
     <div className="animate-fade-in pb-12 w-full max-w-7xl mx-auto flex flex-col gap-8">
-      <div className="flex flex-col xl:flex-row gap-6 items-start w-full">
+      <div className="flex flex-col xl:flex-row gap-6 items-stretch w-full">
         {/* LEFT PANEL */}
         <div className="flex-1 w-full space-y-6 min-w-0">
           <Link to={fromClientId ? `/clients/${fromClientId}` : "/projects"} className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
@@ -410,19 +474,25 @@ export default function ProjectDetails() {
             <div className="relative z-10 flex flex-col gap-4">
               <div className="flex justify-between items-start relative z-10">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shadow-sm border border-indigo-100 font-black text-2xl shrink-0 group-hover:scale-110 transition-transform duration-300">
-                    {client?.name?.charAt(0) || 'C'}
-                  </div>
-                  <div className="space-y-0.5">
-                    <h1 className="text-3xl lg:text-4xl font-black tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">{project.name}</h1>
-                    <p className="text-slate-400 font-bold tracking-wide text-xs uppercase">
-                      Client : {client?.name}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="text-3xl lg:text-4xl font-black tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">
+                        {client?.name || 'Client Inconnu'}
+                      </h1>
+                    </div>
+                    <p className="text-slate-400 font-bold tracking-wide text-xs uppercase flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                      Projet : {project.name}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 mt-4 lg:mt-0">
-
+                  {project.product && (
+                    <span className="bg-indigo-50/50 text-indigo-700 border border-indigo-100 px-4 py-2 rounded-xl font-black text-sm tracking-widest uppercase shadow-sm flex items-center justify-center">
+                      {project.product}
+                    </span>
+                  )}
                   <button onClick={() => setShowEditProject(true)} className="bg-blue-50/50 hover:bg-blue-100/50 text-blue-600 border border-blue-100 hover:border-blue-200 px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-all flex items-center gap-2">
                     <Edit3 className="w-4 h-4" /> Modifier
                   </button>
@@ -440,24 +510,18 @@ export default function ProjectDetails() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 relative z-10 pt-4 border-t border-slate-100">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Produit</span>
-                  <span className="text-sm font-extrabold text-indigo-600">{project.product || '-'}</span>
+              <div className="flex flex-wrap items-center justify-between gap-4 mt-6 relative z-10 pt-4 border-t border-slate-100 w-full">
+                <div className="flex items-center gap-12">
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Entité</span>
+                    <span className="text-sm font-extrabold text-slate-700">{project.entity || '-'}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Version</span>
+                    <span className="text-sm font-extrabold text-slate-700">{project.version || '-'}</span>
+                  </div>
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Entité</span>
-                  <span className="text-sm font-extrabold text-slate-700">{project.entity || '-'}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Mode Actif</span>
-                  <span className="text-sm font-extrabold text-slate-700">{currentContract?.mode || project.mode || 'Aucun'}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Phase Active</span>
-                  <span className="text-sm font-extrabold text-slate-700">{currentContract?.phase || project.phase || '-'}</span>
-                </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col text-right">
                   <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Date Création</span>
                   <span className="text-sm font-extrabold text-slate-700">{project.createdAt || '-'}</span>
                 </div>
@@ -474,14 +538,13 @@ export default function ProjectDetails() {
             const activeEncaissements = project.encaissements?.filter(e => e.status !== 'UPCOMING' && e.status !== 'ABANDONED') || [];
 
             activeEncaissements.forEach(enc => {
-              if (enc.mode === 'Acquisition') {
-                missingDocsCount += missingAcquisitionDocs.length;
-              } else if (enc.mode === 'Maintenance') {
-                if (enc.proforma?.status === 'PENDING') missingDocsCount++;
-                if (enc.bc?.status === 'PENDING') missingDocsCount++;
-                if (enc.facture?.status === 'PENDING') missingDocsCount++;
-                if (enc.status !== 'DONE') missingDocsCount++;
-              }
+              if (enc.soumission?.status !== 'VALIDATED') missingDocsCount++;
+              if (enc.convention?.status !== 'VALIDATED') missingDocsCount++;
+              if (enc.proforma?.status !== 'VALIDATED') missingDocsCount++;
+              if (enc.bc?.status !== 'RECOVERED') missingDocsCount++;
+              if (enc.serviceFait?.status !== 'RECOVERED') missingDocsCount++;
+              if (enc.facture?.status !== 'VALIDATED') missingDocsCount++;
+              if (enc.abe?.status !== 'RECOVERED') missingDocsCount++;
             });
 
             return (
@@ -513,10 +576,27 @@ export default function ProjectDetails() {
               <h3 className="font-extrabold text-xl text-slate-900">
                 Modes
               </h3>
-              <button onClick={() => setShowNewAnnexeModal(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-colors shadow-sm">
-                <Plus className="w-4 h-4" />
-                Prestation Annexe
-              </button>
+              <div className="flex items-center gap-2">
+                {manualFusionSelection.length > 1 && (
+                  <button onClick={handleFuseDossiers} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white rounded-xl text-xs font-bold transition-all shadow-md hover:-translate-y-0.5 shadow-violet-600/20 mr-2">
+                    <FolderKanban className="w-4 h-4" />
+                    Fusionner ({manualFusionSelection.length})
+                  </button>
+                )}
+                <button onClick={() => setShowNewContractModal(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-colors shadow-sm">
+                  <Plus className="w-4 h-4" />
+                  Contrat
+                </button>
+                <button onClick={() => {
+                  setNewEncaissementContractId(selectedContractId || contractsList[0]?.id || '');
+                  setNewEncaissementProduct(project?.product || '');
+                  setNewEncaissementVersion(project?.version || '');
+                  setShowNewEncaissementModal(true);
+                }} className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold transition-colors shadow-sm">
+                  <Plus className="w-4 h-4" />
+                  Encaissement
+                </button>
+              </div>
             </div>
             <div className="flex flex-row items-stretch gap-5 overflow-x-auto pb-8 pt-6 px-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative">
               {(() => {
@@ -529,6 +609,8 @@ export default function ProjectDetails() {
                 }
                 const activeList = contractsList.filter(c => c.status === 'ACTIVE');
                 const inactiveList = contractsList.filter(c => c.status !== 'ACTIVE');
+
+                const activeIndependentEncaissements = (project.encaissements || []).filter(e => e.mode === 'Indépendant');
 
                 const activeGroups: { parent: any, annexes: any[] }[] = [];
                 const standaloneActive: any[] = [];
@@ -549,14 +631,116 @@ export default function ProjectDetails() {
                      standaloneActive.push(annexe);
                    }
                 });
+                
+                activeIndependentEncaissements.forEach(enc => {
+                  standaloneActive.push({ ...enc, isEncaissementCard: true, name: enc.title || 'Encaissement' });
+                });
 
                 const allActiveGroups = [...activeGroups];
                 standaloneActive.forEach(a => allActiveGroups.push({ parent: a, annexes: [] }));
 
                 const renderCard = (card: any, extraClasses: string = "") => {
+                  if (card.isEncaissementCard) {
+                    const isDone = card.status === 'DONE';
+                    const isPending = card.status === 'PENDING';
+                    
+                    return (
+                      <div
+                        key={card.id}
+                        className={cn(
+                          "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-500 border overflow-hidden relative group",
+                          "bg-cyan-400 backdrop-blur-xl border-cyan-300 shadow-cyan-500/20",
+                          extraClasses
+                        )}
+                      >
+                        {card.status !== 'DONE' && (
+                          <div className="absolute top-4 right-4 z-20">
+                            {(card.isCombined || card.combinedWithDossierId) ? (
+                              <div className="w-4 h-4 rounded-full bg-cyan-100/50 shadow-sm border border-white" title="Inclus dans un dossier d'encaissement" />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const isChecked = manualFusionSelection.some((item: any) => item.id === card.id);
+                                  if (!isChecked) {
+                                    setManualFusionSelection([...manualFusionSelection, card]);
+                                  } else {
+                                    setManualFusionSelection(manualFusionSelection.filter((item: any) => item.id !== card.id));
+                                  }
+                                }}
+                                className={cn(
+                                  "w-5 h-5 rounded-full border-2 transition-all hover:scale-110 shadow-sm flex items-center justify-center",
+                                  manualFusionSelection.some((e: any) => e.id === card.id)
+                                    ? "bg-white border-white text-cyan-500" 
+                                    : "bg-white/20 border-white text-transparent hover:bg-white/30"
+                                )}
+                                title="Sélectionner pour fusion"
+                              >
+                                {manualFusionSelection.some((e: any) => e.id === card.id) && (
+                                  <svg viewBox="0 0 14 14" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 7.5L5.5 10L11 4" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        <div className="relative z-10 flex flex-col h-full pt-1 w-full">
+                          <div className="flex items-start justify-between w-full">
+                            <div className="flex items-start gap-2">
+                              {isDone && <CheckCircle2 className="w-5 h-5 text-cyan-100 shrink-0 mt-0.5" />}
+                              <h4 className="font-extrabold text-[22px] tracking-tight leading-none mb-1.5 text-white pr-8">
+                                {card.name}
+                              </h4>
+                            </div>
+                          </div>
+                          
+                          <span className="text-xs font-bold block mb-4 text-cyan-50 uppercase">
+                            Encaissement
+                          </span>
+                          
+                          <div className="flex justify-between items-end mt-auto w-full">
+                            <div className="flex flex-col gap-2.5">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-100">
+                                {card.targetDate ? `Cible: ${new Date(card.targetDate).toLocaleDateString('fr-FR')}` : 'Non défini'}
+                              </span>
+                              <div className="font-bold text-sm text-white">
+                                {card.encaissementType === 'AVANCE' ? `Avance (${card.percentage || 30}%)` : 'Total (Solde)'}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              {card.status !== 'DONE' && (
+                                <button onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateProject(project.id, {
+                                    encaissements: (project.encaissements || []).map(enc => enc.id === card.id ? { ...enc, status: 'DONE' } : enc)
+                                  });
+                                }} className="p-2 bg-white/20 text-white hover:bg-white/30 rounded-xl backdrop-blur-sm" title="Marquer comme Réglé">
+                                  <CheckCircle className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button onClick={(e) => {
+                                e.stopPropagation();
+                                setShowFacturation(card.id);
+                              }} className="p-2 bg-white/20 text-white hover:bg-white/30 rounded-xl backdrop-blur-sm" title="Gérer le dossier">
+                                <Banknote className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   const isActive = selectedContractId ? card.id === selectedContractId : currentContract?.id === card.id;
                   const isPending = card.status === 'PENDING';
                   const isDone = card.status === 'DONE' || card.status === 'ABANDONED';
+                  
+                  const allEncaissementsForContract = (project.encaissements || []).filter(e => e.contractId === card.id);
+                  const activeEncaissements = allEncaissementsForContract.filter(e => e.status !== 'DONE');
+                  const hasActiveEncaissements = activeEncaissements.length > 0 && !isPending;
+                  const hasAnyEncaissement = allEncaissementsForContract.length > 0 && !isPending;
 
                   const activePhaseIndex = card.phases ? card.phases.findIndex((p: any) => p.status !== 'DONE') : -1;
                   const actualPhaseIndex = activePhaseIndex === -1 && card.phases && card.phases.length > 0 ? card.phases.length - 1 : Math.max(0, activePhaseIndex);
@@ -564,15 +748,17 @@ export default function ProjectDetails() {
                   const currentPhaseCount = card.phases && card.phases.length > 0 ? actualPhaseIndex + 1 : 0;
                   const totalPhasesCount = card.phases?.length || 0;
 
+                  const hasColor = card.status === 'ACTIVE';
+
                   let colorClasses = "";
                   if (card.mode === 'Acquisition') {
-                    colorClasses = isActive ? "bg-blue-50 backdrop-blur-xl border-blue-200/60 shadow-blue-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-blue-50 hover:border-blue-200/60";
+                    colorClasses = hasColor ? "bg-blue-50 backdrop-blur-xl border-blue-200/60 shadow-blue-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-blue-50 hover:border-blue-200/60";
                   } else if (card.mode === 'Maintenance offerte') {
-                    colorClasses = isActive ? "bg-red-50 backdrop-blur-xl border-red-200/60 shadow-red-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-red-50 hover:border-red-200/60";
+                    colorClasses = hasColor ? "bg-red-50 backdrop-blur-xl border-red-200/60 shadow-red-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-red-50 hover:border-red-200/60";
                   } else if (card.mode === 'Annexe') {
-                    colorClasses = isActive ? "bg-amber-50 backdrop-blur-xl border-amber-200/60 shadow-amber-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-amber-50 hover:border-amber-200/60";
+                    colorClasses = hasColor ? "bg-amber-50 backdrop-blur-xl border-amber-200/60 shadow-amber-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-amber-50 hover:border-amber-200/60";
                   } else {
-                    colorClasses = isActive ? "bg-emerald-50 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-emerald-50 hover:border-emerald-200/60";
+                    colorClasses = hasColor ? "bg-emerald-50 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10" : "bg-white backdrop-blur-xl border-slate-200/60 hover:bg-emerald-50 hover:border-emerald-200/60";
                   }
 
                   return (
@@ -583,14 +769,56 @@ export default function ProjectDetails() {
                         setShowContractManager(true);
                       }}
                       className={cn(
-                        "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border overflow-hidden",
+                        "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border overflow-hidden relative group",
                         colorClasses,
+                        hasAnyEncaissement ? "pr-11" : "",
                         extraClasses,
                         isActive ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02] grayscale-0 opacity-100" : "shadow-sm hover:shadow-md hover:-translate-y-1 hover:scale-[1.02] grayscale-[15%] hover:grayscale-0",
                         (isPending && !isActive) ? "grayscale-[50%] opacity-100 bg-slate-50 hover:grayscale-0" : "",
                         (isDone && !isActive) ? "grayscale-[30%] opacity-100 bg-slate-50 hover:grayscale-0" : ""
                       )}
                     >
+                      {hasAnyEncaissement && (
+                        <div className="absolute right-0 top-0 bottom-0 w-9 bg-cyan-400 flex items-center justify-center z-20 shadow-[-2px_0_10px_rgba(34,211,238,0.2)]">
+                          <span className="text-white font-black text-[11px] tracking-[0.15em] uppercase" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                            Encaissement
+                          </span>
+                        </div>
+                      )}
+                      {hasActiveEncaissements && (
+                        <div className="absolute top-4 right-0 w-9 flex justify-center z-30" onClick={e => e.stopPropagation()}>
+                          {activeEncaissements.some((e: any) => e.isCombined || e.combinedWithDossierId) ? (
+                            <div className="w-4 h-4 rounded-full bg-violet-500 border-2 border-white shadow-sm" title="Inclus dans un dossier d'encaissement" />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const isChecked = manualFusionSelection.some((item: any) => item.id === card.id);
+                                if (!isChecked) {
+                                  setManualFusionSelection([...manualFusionSelection, card]);
+                                } else {
+                                  setManualFusionSelection(manualFusionSelection.filter((item: any) => item.id !== card.id));
+                                }
+                              }}
+                              className={cn(
+                                "w-4 h-4 rounded-full border-2 transition-all hover:scale-110 shadow-sm flex items-center justify-center",
+                                manualFusionSelection.some((e: any) => e.id === card.id)
+                                  ? "bg-blue-500 border-blue-500 text-white" 
+                                  : "bg-white border-white text-transparent hover:border-blue-300"
+                              )}
+                              title="Sélectionner pour fusion"
+                            >
+                              {manualFusionSelection.some((e: any) => e.id === card.id) && (
+                                <svg viewBox="0 0 14 14" fill="none" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3 7.5L5.5 10L11 4" />
+                                </svg>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      
                       {isActive && (
                         <>
                           <div className={cn("absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-blue-100' : card.mode === 'Maintenance offerte' ? 'bg-red-100' : 'bg-green-100')}></div>
@@ -600,32 +828,34 @@ export default function ProjectDetails() {
 
                       <div className="relative z-10 flex flex-col h-full pt-1 w-full">
                         <div className="flex items-start justify-between w-full">
-                          <h4 className={cn(
-                            "font-extrabold text-[22px] tracking-tight leading-none mb-1.5 transition-colors",
-                            isActive ? (card.mode === 'Acquisition' ? "text-blue-900" : card.mode === 'Maintenance offerte' ? "text-red-900" : "text-green-900") : "text-slate-800"
-                          )}>
-                            {card.name}
-                          </h4>
-                          {isDone && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 ml-2" />}
+                          <div className="flex items-start gap-2">
+                            {isDone && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+                            <h4 className={cn(
+                              "font-extrabold text-[22px] tracking-tight leading-none mb-1.5 transition-colors pr-8",
+                              hasColor ? (card.mode === 'Acquisition' ? "text-blue-900" : card.mode === 'Maintenance offerte' ? "text-red-900" : "text-green-900") : "text-slate-800"
+                            )}>
+                              {card.name}
+                            </h4>
+                          </div>
                         </div>
                         {activePhase && (
                           <span className={cn(
                             "text-xs font-bold block mb-4 transition-colors",
-                            isActive ? "text-slate-600" : "text-slate-400"
+                            hasColor ? "text-slate-600" : "text-slate-400"
                           )}>
-                            <span className={isActive ? "text-slate-900" : "text-slate-500"}>{activePhase.name}</span>
+                            <span className={hasColor ? "text-slate-900" : "text-slate-500"}>{activePhase.name}</span>
                           </span>
                         )}
                         <div className="flex justify-between items-end mt-auto w-full">
                           <div className="flex flex-col gap-2.5">
                             <span className={cn(
                               "text-[10px] font-bold uppercase tracking-wider transition-colors",
-                              isActive ? "text-slate-500" : "text-slate-400"
+                              hasColor ? "text-slate-500" : "text-slate-400"
                             )}>
                               {(() => {
                                 let displayDate = card.startDate;
                                 if (!displayDate && card.mode === 'Maintenance') {
-                                  const match = card.name.match(/Année (\d+)/);
+                                  const match = card.name.match(/\d+/);
                                   if (match) {
                                     const year = parseInt(match[1], 10);
                                     const enc = project.encaissements?.find(e => e.mode === 'Maintenance' && e.year === year);
@@ -653,10 +883,10 @@ export default function ProjectDetails() {
                             )}
                           </div>
                           <div className={cn(
-                            "text-sm font-extrabold transition-colors",
+                            "text-sm font-extrabold transition-colors flex flex-col items-end gap-1",
                             isActive ? "text-slate-800" : "text-slate-500"
                           )}>
-                            {currentPhaseCount}/{totalPhasesCount} <span className="text-[10px] uppercase font-bold opacity-70">Phases</span>
+                            <span>{currentPhaseCount}/{totalPhasesCount} <span className="text-[10px] uppercase font-bold opacity-70">Phases</span></span>
                           </div>
                         </div>
                       </div>
@@ -669,7 +899,7 @@ export default function ProjectDetails() {
                     
                     {/* ZONE DROITE : Inactifs */}
                     {inactiveList.length > 0 && (
-                      <div className="peer/inactive order-last flex flex-row items-center -space-x-[224px] hover:space-x-5 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] shrink-0 relative pt-10 pb-2 pl-4 pr-4">
+                      <div className="peer/inactive order-last flex flex-row items-center -space-x-[224px] transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] shrink-0 relative pt-10 pb-2 pl-4 pr-4">
                         <div className="absolute top-0 left-8 text-[10px] font-black uppercase text-slate-400 tracking-widest z-50">Historique & À venir</div>
                         {inactiveList.map((card, idx) => (
                            <div key={card.id} className="relative shrink-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-2 hover:!z-50" style={{ zIndex: idx }}>
@@ -686,8 +916,7 @@ export default function ProjectDetails() {
 
                     {/* ZONE GAUCHE : Actifs */}
                     <div className={cn(
-                      "order-first flex flex-row items-center transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] relative pt-10 pb-2",
-                      inactiveList.length > 0 ? "space-x-5 peer-hover/inactive:-space-x-[240px]" : "gap-5"
+                      "order-first flex flex-row items-center transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] relative pt-10 pb-2 gap-5"
                     )}>
                       {allActiveGroups.length > 0 && (
                         <div className="absolute top-0 left-4 text-[10px] font-black uppercase text-slate-400 tracking-widest z-50">Actifs</div>
@@ -695,18 +924,18 @@ export default function ProjectDetails() {
                       {allActiveGroups.map((grp, idx) => (
                        <div key={idx} className={cn(
                          "relative flex flex-row items-center transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] hover:!z-50",
-                         grp.annexes.length > 0 ? "group/ministack -space-x-[224px] hover:space-x-5" : ""
+                         grp.annexes.length > 0 ? "group/ministack -space-x-[224px]" : ""
                        )} style={{ zIndex: 40 - idx }}>
                          
                          {/* Parent Contract */}
-                         <div className="relative shrink-0 z-20 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]">
+                         <div className="relative shrink-0 z-20 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-2 hover:!z-50">
                            {renderCard(grp.parent)}
                          </div>
 
                          {/* Annexes */}
                          {grp.annexes.map((annexe, aIdx) => (
                             <div key={annexe.id} 
-                                 className="relative shrink-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]" 
+                                 className="relative shrink-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-2 hover:!z-50" 
                                  style={{ zIndex: 19 - aIdx }}>
                                {renderCard(annexe)}
                             </div>
@@ -719,11 +948,158 @@ export default function ProjectDetails() {
                 );
               })()}
             </div>
+            
+            {/* DOSSIERS FUSIONNÉS */}
+            {(() => {
+              const mergedDossiers = dossiersPaiement.filter(d => 
+                d.projectIds.includes(project.id) && 
+                d.encaissementIds.length > 1
+              );
+              
+              if (mergedDossiers.length === 0) return null;
+
+              return (
+                <div className="mt-8 px-8 pb-8 border-t border-slate-100 pt-8 shrink-0">
+                  <h3 className="font-extrabold text-slate-900 text-xl mb-6 flex items-center gap-3">
+                    <div className="bg-violet-100 p-2 rounded-xl text-violet-600">
+                      <Banknote className="w-5 h-5" />
+                    </div>
+                    Dossiers d'encaissement fusionnés
+                  </h3>
+                  <div className="flex flex-col gap-4 pb-4">
+                    {mergedDossiers.map(dossier => {
+                      const encs = (project.encaissements || []).filter(e => dossier.encaissementIds.includes(e.id));
+                      const encsSum = encs.reduce((sum, e) => {
+                         if (e.montantTotal) return sum + e.montantTotal;
+                         if (e.mode === 'Annexe') return sum + ((e.annexePrice || 0) * 1.19);
+                         
+                         const prod = project.product || 'PAYE';
+                         const vers = project.version;
+                         const priceMode = (e.mode === 'Acquisition' || e.mode === 'Maintenance') ? e.mode : 'Acquisition';
+                         const basePrice = getPrice(prod, vers, priceMode, client, project);
+                         let price = basePrice;
+                         
+                         if (e.encaissementType === 'AVANCE') {
+                            const pct = e.percentage || 30;
+                            price = basePrice * (pct / 100);
+                         } else if (e.encaissementType === 'TOTAL') {
+                            if (e.contractId) {
+                               const paidAvances = (project.encaissements || []).filter(other => 
+                                  other.contractId === e.contractId && 
+                                  other.encaissementType === 'AVANCE' && 
+                                  other.status === 'DONE'
+                               );
+                               let totalPaid = 0;
+                               paidAvances.forEach(pa => {
+                                  const paPct = pa.percentage || 30;
+                                  totalPaid += basePrice * (paPct / 100);
+                               });
+                               price = Math.max(0, basePrice - totalPaid);
+                            }
+                         }
+                         return sum + (price * 1.19);
+                      }, 0);
+                      const totalMontant = dossier.total > 0 ? dossier.total : encsSum;
+
+                      const isSelected = manualFusionSelection.some((e: any) => e.isCombined && e.combinedWithDossierId === dossier.id);
+
+                      return (
+                        <div key={dossier.id} className={cn(
+                          "flex flex-col xl:flex-row xl:items-center justify-between p-5 rounded-[28px] text-left transition-all duration-300 border relative group gap-4 overflow-hidden",
+                          isSelected ? "shadow-md ring-2 ring-violet-300 bg-violet-50 border-violet-300" : "bg-violet-50/80 border-violet-200 hover:shadow-md hover:-translate-y-0.5 hover:bg-violet-50"
+                        )}>
+                          {/* Background Glows (Optional, subtle) */}
+                          <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-blue-100 opacity-50"></div>
+                          <div className="absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-indigo-100 opacity-50"></div>
+                          
+                          {/* LEFT: Checkbox + Title + Date */}
+                          <div className="relative z-10 flex items-start xl:items-center gap-4 xl:w-[25%] shrink-0">
+                            {dossier.status !== 'CLOSED' && dossier.status !== 'DONE' && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isSelected) setManualFusionSelection(manualFusionSelection.filter((item: any) => item.combinedWithDossierId !== dossier.id));
+                                  else setManualFusionSelection([...manualFusionSelection, encs[0]]);
+                                }}
+                                className={cn(
+                                  "mt-1.5 xl:mt-0 w-4 h-4 rounded-full border-2 transition-all hover:scale-110 shadow-sm flex items-center justify-center shrink-0",
+                                  isSelected
+                                    ? "bg-blue-500 border-blue-500 text-white" 
+                                    : "bg-white/80 border-slate-300 text-transparent hover:border-blue-400"
+                                )}
+                                title="Sélectionner pour fusion"
+                              >
+                                {isSelected && (
+                                  <svg viewBox="0 0 14 14" fill="none" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 7.5L5.5 10L11 4" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                            <div className="flex flex-col">
+                              <h4 className="font-extrabold text-[20px] tracking-tight leading-none text-violet-900 mb-1">Dossier Fusionné</h4>
+                              <p className="text-[10px] uppercase font-bold text-slate-500">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</p>
+                            </div>
+                          </div>
+
+                          {/* MIDDLE: Included items */}
+                          <div className="relative z-10 flex flex-col gap-2 flex-1 w-full xl:w-auto">
+                              {encs.map(e => (
+                                <div key={e.id} className="flex items-center gap-2 text-[11px] font-bold text-slate-700 bg-white/60 px-3 py-1.5 rounded-xl border border-white/40 shadow-sm w-fit max-w-full">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+                                  <span className="truncate">
+                                    {e.mode} {e.year ? `(Année ${e.year})` : e.title ? `(${e.title})` : ''} - {e.encaissementType === 'AVANCE' ? 'Avance' : 'Solde'}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+
+                          {/* RIGHT: Status + Total + Button */}
+                          <div className="relative z-10 flex items-center justify-between xl:justify-end gap-6 xl:w-[35%] shrink-0 mt-2 xl:mt-0 pt-4 xl:pt-0 border-t xl:border-t-0 border-violet-200/50 w-full xl:w-auto">
+                              <div className="flex flex-col xl:items-end gap-1 flex-1">
+                                <span className={cn(
+                                  "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm w-fit",
+                                  dossier.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                                )}>
+                                  {dossier.status === 'DONE' ? 'Payé' : 'En cours'}
+                                </span>
+                                <div className="flex flex-col xl:items-end mt-1">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500">Montant total</span>
+                                  <span className="text-sm font-extrabold text-violet-900">
+                                    {totalMontant > 0 ? `${totalMontant.toLocaleString()} DA` : '-'}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              <button
+                                onClick={() => setDossierToDissociate(dossier.id)}
+                                className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition-colors"
+                              >
+                                Dissocier
+                              </button>
+                              
+                              <button
+                                onClick={() => setShowFacturation(dossier.id)}
+                                className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white rounded-xl text-xs font-bold shadow-md transition-transform hover:-translate-y-0.5 whitespace-nowrap shrink-0"
+                              >
+                                Gérer le dossier
+                              </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
-        {/* Panneau droit : Historique */}
-        <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1 z-50">
+        {/* Panneau droit : Wrapper */}
+        <div className="w-full xl:w-80 shrink-0 relative">
+          {/* Panneau droit : Sticky Content */}
+          <div className="flex flex-col gap-6 sticky top-6 max-h-[calc(100vh-4rem)] overflow-y-auto pr-1 pb-4 z-50">
           <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
             <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-indigo-600 block shadow-sm" />
@@ -740,415 +1116,8 @@ export default function ProjectDetails() {
               {historyList.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun historique.</p>}
             </div>
           </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col xl:flex-row gap-6 items-start w-full mt-2">
-        <div className="flex-1 w-full space-y-4 min-w-0">
-          {/* Liste des Encaissements */}
-          <div className="mt-2 space-y-4">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3 className="font-extrabold text-xl text-slate-900">
-                  Échéancier des Encaissements
-                </h3>
-                <p className="text-slate-500 text-sm mt-1 font-semibold">Suivi automatisé des acquisitions et maintenances</p>
-              </div>
-              {manualFusionSelection.length >= 2 && (
-                <button
-                  disabled={isCreatingDossier}
-                  onClick={() => handleCreateDossier(manualFusionSelection)}
-                  className={`px-4 py-2 rounded-xl font-bold transition-colors shadow-sm flex items-center gap-2 text-sm ${isCreatingDossier ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'}`}
-                >
-                  <FolderKanban className="w-4 h-4" />
-                  {isCreatingDossier ? 'Création...' : "Créer Dossier d'encaissement"}
-                </button>
-              )}
-            </div>
-
-            {(!project.encaissements || project.encaissements.length === 0) ? (
-              <div className="text-center py-10 bg-slate-50/50 rounded-3xl border border-slate-100">
-                <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-500 font-bold">Aucun encaissement programmé.</p>
-                <p className="text-slate-400 text-sm mt-1">Validez la tâche "Formation" dans l'Acquisition pour générer l'échéancier initial.</p>
-              </div>
-            ) : (() => {
-
-              const sortedEncaissements = [...project.encaissements].sort((a, b) => {
-                const timeA = a.targetDate ? new Date(a.targetDate).getTime() : 0;
-                const timeB = b.targetDate ? new Date(b.targetDate).getTime() : 0;
-                const diff = timeA - timeB;
-                if (diff !== 0) return diff;
-
-                if (a.mode === 'Acquisition' && b.mode === 'Maintenance') return -1;
-                if (a.mode === 'Maintenance' && b.mode === 'Acquisition') return 1;
-                return 0;
-              });
-
-              const pastEncaissements = sortedEncaissements.filter(e => {
-                if (e.status !== 'DONE' && e.status !== 'ABANDONED') return false;
-                if (e.isCombined) {
-                  const dossierId = e.combinedWithDossierId || e.dossierId;
-                  const dossier = dossiersPaiement.find(d => d.id === dossierId);
-                  if (dossier && dossier.status !== 'CLOSED') {
-                    return false;
-                  }
-                }
-                return true;
-              });
-              const activeIndependent = sortedEncaissements.filter(e =>
-                !pastEncaissements.includes(e) && !e.isCombined
-              );
-
-              const activeCombinedEncaissements = sortedEncaissements.filter(e =>
-                !pastEncaissements.includes(e) && e.isCombined
-              );
-
-              const projectDossiersMap = new Map<string, typeof project.encaissements>();
-              activeCombinedEncaissements.forEach(e => {
-                const dossierId = e.combinedWithDossierId || e.dossierId;
-                if (!dossierId) return;
-                if (!projectDossiersMap.has(dossierId)) {
-                  projectDossiersMap.set(dossierId, []);
-                }
-                projectDossiersMap.get(dossierId)!.push(e);
-              });
-
-              const activeItems: any[] = [];
-              activeIndependent.forEach(e => activeItems.push({ type: 'ENCAISSEMENT', data: e, date: e.targetDate }));
-
-              projectDossiersMap.forEach((encs, dossierId) => {
-                const dossier = dossiersPaiement.find(d => d.id === dossierId);
-                if (dossier) {
-                  activeItems.push({ type: 'DOSSIER', data: dossier, encaissements: encs, date: encs[0]?.targetDate });
-                }
-              });
-
-              activeItems.sort((a, b) => {
-                const timeA = a.date ? new Date(a.date).getTime() : 0;
-                const timeB = b.date ? new Date(b.date).getTime() : 0;
-                if (timeA !== timeB) return timeA - timeB;
-
-                const modeA = a.type === 'DOSSIER' ? a.encaissements[0]?.mode : a.data.mode;
-                const modeB = b.type === 'DOSSIER' ? b.encaissements[0]?.mode : b.data.mode;
-
-                if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
-                if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
-                return 0;
-              });
-
-              const renderEncaissementCard = (enc: any, isStacked: boolean = false, stackIdx: number = 0, totalStacked: number = 0) => {
-                const isUpcoming = enc.status === 'UPCOMING';
-                const isDone = enc.status === 'DONE';
-                const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
-                const isPartial = enc.status === 'PARTIAL';
-
-                const getActiveStep = () => {
-                  if (enc.status === 'DONE') return null;
-                  if (enc.facture.status === 'VALIDATED') return { doc: 'Paiement', state: 'En attente' };
-                  if (enc.bc.status === 'RECOVERED') {
-                    const s = enc.facture.status;
-                    if (s === 'PENDING') return { doc: 'Facture', state: 'À générer' };
-                    if (s === 'GENERATED') return { doc: 'Facture', state: 'Générée' };
-                    if (s === 'TO_VERIFY') return { doc: 'Facture', state: 'À vérifier' };
-                    return { doc: 'Facture', state: 'Validée' };
-                  }
-                  if (enc.proforma.status === 'VALIDATED') {
-                    const s = enc.bc.status;
-                    if (s === 'PENDING') return { doc: 'Bon de commande', state: 'En attente' };
-                    return { doc: 'Bon de commande', state: 'Récupéré' };
-                  }
-                  const s = enc.proforma.status;
-                  if (s === 'PENDING') return { doc: 'Proforma', state: 'À générer' };
-                  if (s === 'GENERATED') return { doc: 'Proforma', state: 'Générée' };
-                  if (s === 'TO_VERIFY') return { doc: 'Proforma', state: 'À vérifier' };
-                  return { doc: 'Proforma', state: 'Validée' };
-                };
-
-                const activeStep = getActiveStep();
-
-                const stackedStyles = isStacked ? {
-                  position: 'absolute' as const,
-                  top: `${40 + stackIdx * 8}px`,
-                  left: `${stackIdx * 15}px`,
-                  right: 0,
-                  zIndex: stackIdx,
-                  opacity: 0.6 + (stackIdx * (0.4 / Math.max(totalStacked, 1))),
-                  transform: 'scale(0.98)',
-                  transformOrigin: 'top left'
-                } : {};
-
-                return (
-                  <div key={enc.id}
-                    style={stackedStyles}
-                    className={cn(
-                      "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300",
-                      isStacked ? "hover:-translate-y-2 hover:opacity-100 hover:z-50 cursor-pointer shadow-lg bg-slate-100 border-slate-300" :
-                        isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80 shadow-sm" :
-                          isDone ? "bg-emerald-50 border-emerald-200/60 shadow-sm" :
-                            "bg-white border-blue-200/60 shadow-md shadow-blue-500/5",
-                      manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
-                    )}>
-                    <div className="flex items-center gap-4">
-                      {!isStacked && isProgress && (
-                        <div className="pt-1">
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
-                            checked={manualFusionSelection.some(e => e.id === enc.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setManualFusionSelection([...manualFusionSelection, enc]);
-                              } else {
-                                setManualFusionSelection(manualFusionSelection.filter(item => item.id !== enc.id));
-                              }
-                            }}
-                          />
-                        </div>
-                      )}
-                      <div className={cn(
-                        "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
-                        isStacked ? "bg-slate-200 text-slate-500" :
-                          isUpcoming ? "bg-slate-200 text-slate-500" :
-                            isDone ? "bg-emerald-100 text-emerald-600" :
-                              "bg-blue-100 text-blue-600"
-                      )}>
-                        <Calendar className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className={cn(
-                          "font-extrabold text-base mb-1",
-                          isStacked ? "text-slate-600" :
-                            isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
-                        )}>
-                          {enc.mode} {enc.year ? `(Année ${enc.year})` : ''}
-                        </h4>
-                        <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                          <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider whitespace-nowrap">{project.product} {project.version}</span>
-                          <span>•</span>
-                          <span className={cn(
-                            "whitespace-nowrap",
-                            (!isStacked && isDone) ? "text-emerald-600" : (!isStacked && isProgress) ? "text-blue-600" : ""
-                          )}>
-                            Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-end gap-3 w-full md:w-auto">
-                      {activeStep && (
-                        <span className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black tracking-widest border border-blue-200 flex items-center gap-1.5 shadow-sm whitespace-nowrap">
-                          <span className="uppercase">{activeStep.doc}</span>
-                          <span className="opacity-40">-</span>
-                          <span className="uppercase text-blue-500">{activeStep.state}</span>
-                        </span>
-                      )}
-                      {enc.isCombined && (
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm whitespace-nowrap">
-                            <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
-                          </span>
-                          {(() => {
-                            const dossierId = enc.combinedWithDossierId || (enc as any).dossierId;
-                            const dossier = dossiersPaiement.find(d => d.id === dossierId);
-                            if (!dossier || !dossier.projectIds) return null;
-                            return dossier.projectIds.map((pid: string, idx: number) => {
-                              const pName = projects.find(proj => proj.id === pid)?.name;
-                              if (!pName || pName === project.name) return null;
-                              return (
-                                <span key={idx} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 shadow-sm whitespace-nowrap">
-                                  + {pName}
-                                </span>
-                              );
-                            });
-                          })()}
-                        </div>
-                      )}
-
-                      {(isDone || isPartial) && enc.montantTotal && (
-                        <div className="text-right">
-                          <div className="text-xs font-extrabold text-slate-800">
-                            {enc.montantEncaisse?.toLocaleString('fr-DZ')} DA / {enc.montantTotal.toLocaleString('fr-DZ')} DA
-                          </div>
-                          {isPartial && enc.resteDette && (
-                            <div className="text-[10px] font-bold text-red-500 mt-0.5">Dette reportée: {enc.resteDette.toLocaleString('fr-DZ')} DA</div>
-                          )}
-                        </div>
-                      )}
-
-                      {isProgress && !isStacked && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setShowFacturation(enc.combinedWithDossierId || enc.id)}
-                            className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
-                          >
-                            <Banknote className="w-4 h-4" /> Gérer l'encaissement
-                          </button>
-                          {enc.mode === 'Maintenance' && enc.proforma?.status === 'PENDING' && (
-                            <button
-                              onClick={() => {
-                                if (window.confirm("Voulez-vous vraiment annuler l'activation de cette maintenance ?\nCela supprimera la prévision de l'année suivante.")) {
-                                  deactivateMaintenanceEncaissement(project.id, enc.id);
-                                }
-                              }}
-                              className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 border border-red-200 hover:border-red-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap"
-                            >
-                              <PowerOff className="w-4 h-4" /> Désactiver
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {isDone && (
-                        <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4" /> Clôturé
-                        </span>
-                      )}
-                      {isUpcoming && !isStacked && (
-                        <div className="flex items-center gap-2">
-                          <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
-                            <Clock className="w-4 h-4" /> En attente
-                          </span>
-                          <button
-                            onClick={() => {
-                              let confirmMsg = "Voulez-vous vraiment activer la facturation de cette maintenance ?";
-                              if (project.processType === 'STANDARD' && enc.year === 1) {
-                                confirmMsg += "\n\nLa phase 'Maintenance Gratuite' sera terminée et l'encaissement passera en cours.";
-                              }
-                              if (window.confirm(confirmMsg)) {
-                                activateMaintenanceEncaissement(project.id, enc.id);
-                              }
-                            }}
-                            className="px-4 py-2 bg-purple-100 text-purple-700 hover:bg-purple-200 hover:text-purple-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2"
-                          >
-                            <Power className="w-4 h-4" /> Activer
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              };
-
-              const renderDossierCard = (dossier: any, encs: any[]) => {
-                const isSelected = manualFusionSelection.some(e => e.isCombined && e.combinedWithDossierId === dossier.id);
-                return (
-                  <div key={dossier.id} className={cn(
-                    "p-5 border rounded-2xl shadow-sm hover:shadow-md transition-shadow",
-                    isSelected ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : "bg-white border-slate-200"
-                  )}>
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
-                          checked={isSelected}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setManualFusionSelection([...manualFusionSelection, encs[0]]);
-                            } else {
-                              setManualFusionSelection(manualFusionSelection.filter(item => item.combinedWithDossierId !== dossier.id));
-                            }
-                          }}
-                        />
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                            <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
-                          </span>
-                          {dossier.projectIds && dossier.projectIds.map((pid: string, idx: number) => {
-                            const pName = projects.find(proj => proj.id === pid)?.name;
-                            if (!pName) return null;
-                            return (
-                              <span key={idx} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 shadow-sm">
-                                {pName}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
-                        <button
-                          onClick={() => {
-                            if (confirm("Voulez-vous vraiment supprimer ce dossier de paiement ? Les encaissements redeviendront indépendants.")) {
-                              dissociateDossier(dossier.id);
-                            }
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Défusionner"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 mb-5">
-                      {(() => {
-                        const dossierAllEncs = projects.flatMap(p =>
-                          (p.encaissements || []).filter(e => e.combinedWithDossierId === dossier.id || (e as any).dossierId === dossier.id)
-                            .map(e => ({ ...e, projectName: p.name, product: p.product, version: p.version }))
-                        );
-
-                        return dossierAllEncs.sort((a: any, b: any) => {
-                          const modeA = a.mode;
-                          const modeB = b.mode;
-                          if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
-                          if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
-                          return 0;
-                        }).map((enc: any, idx: number) => (
-                          <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
-                            <div>
-                              <div className="text-sm font-bold text-slate-800">{enc.mode} {enc.year ? `(Année ${enc.year})` : enc.annexeName ? `(${enc.annexeName})` : ''} <span className="text-slate-400 font-medium ml-1">— {enc.projectName}</span></div>
-                              <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
-                                <span className="uppercase">{enc.product} {enc.version}</span>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-[10px] text-slate-400 font-medium">Début</div>
-                              <div className="text-sm font-bold text-slate-900">{new Date(enc.targetDate).toLocaleDateString('fr-FR')}</div>
-                            </div>
-                          </div>
-                        ));
-                      })()}
-                    </div>
-
-                    <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
-                      <button
-                        onClick={() => setShowFacturation(dossier.id)}
-                        className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
-                      >
-                        <Banknote className="w-4 h-4" /> Gérer l'encaissement
-                      </button>
-                    </div>
-                  </div>
-                );
-              };
-
-              return (
-                <div className="space-y-4 w-full">
-                  {pastEncaissements.length > 0 && (
-                    <div className="relative mb-2 shrink-0" style={{ height: `${100 + pastEncaissements.length * 8}px` }}>
-                      {pastEncaissements.map((enc, idx) => renderEncaissementCard(enc, true, idx, pastEncaissements.length))}
-                    </div>
-                  )}
-
-                  {activeItems.length > 0 && (
-                    <div className="space-y-4">
-                      {activeItems.map((item, index) =>
-                        item.type === 'ENCAISSEMENT'
-                          ? renderEncaissementCard(item.data)
-                          : renderDossierCard(item.data, item.encaissements)
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/* Panneau droit : Historique des Documents */}
-        <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+          
+          {/* Panneau droit : Historique des Documents */}
           <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
             <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-blue-600 block shadow-sm" />
@@ -1200,6 +1169,7 @@ export default function ProjectDetails() {
           </div>
         </div>
       </div>
+    </div>
 
       {showContractManager && currentContract && (() => {
         const currentPhase = currentContract.phases?.find(p => p.id === activePhaseId) || currentContract.phases?.[0];
@@ -1215,7 +1185,7 @@ export default function ProjectDetails() {
                     <FolderKanban className="w-6 h-6 text-blue-500" />
                     Contrat : {currentContract.name}
                   </h3>
-                  <div className="flex items-center gap-3 ml-9">
+                  <div className="flex items-center gap-3 ml-9 flex-wrap">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-slate-500">Début :</span>
                       <input
@@ -1243,7 +1213,7 @@ export default function ProjectDetails() {
                       <button
                         onClick={() => {
                           if (window.confirm('Voulez-vous vraiment supprimer cette prestation annexe et son encaissement ?')) {
-                            deleteAnnexeContract(project.id, currentContract.id);
+                            // deleteAnnexeContract(project.id, currentContract.id); // Placeholder
                             setShowContractManager(false);
                           }
                         }}
@@ -1256,8 +1226,38 @@ export default function ProjectDetails() {
                     )}
                   </div>
                 </div>
+
+                {/* Tabs Production / Encaissements (Moved to header right) */}
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setContractModalTab('production')}
+                    className={cn(
+                      "flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl transition-all border-2",
+                      contractModalTab === 'production' 
+                        ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm" 
+                        : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:border-slate-300"
+                    )}
+                  >
+                    Production
+                  </button>
+                  <button 
+                    onClick={() => setContractModalTab('encaissement')}
+                    className={cn(
+                      "flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl transition-all border-2",
+                      contractModalTab === 'encaissement' 
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm" 
+                        : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:border-slate-300"
+                    )}
+                  >
+                    Encaissements
+                  </button>
+                </div>
               </div>
 
+
+
+              {contractModalTab === 'production' && (
+              <>
               {/* Onglets des phases */}
               <div className="flex flex-wrap gap-2 pb-2 border-b border-slate-100 mb-4">
                 {(currentContract.phases || []).map((phase) => {
@@ -1277,9 +1277,11 @@ export default function ProjectDetails() {
                   )
                 })}
               </div>
+              </>
+              )}
 
               <div className="flex-1 overflow-y-auto pr-2 space-y-3">
-                {currentPhase && (
+                {contractModalTab === 'production' && currentPhase && (
                   <>
                     <div className="flex flex-col gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
                       <div className="flex justify-between items-center">
@@ -1421,7 +1423,7 @@ export default function ProjectDetails() {
                 )}
 
                 {/* Bouton pour clôturer ou rouvrir la phase */}
-                {currentPhase && (currentPhase.tasks || []).length > 0 && (
+                {contractModalTab === 'production' && currentPhase && (currentPhase.tasks || []).length > 0 && (
                   <div className="mt-8 flex justify-center border-t border-slate-100/50 pt-6 relative z-10">
                     <button
                       onClick={() => togglePhaseStatus(project.id, currentContract.id, currentPhase.id)}
@@ -1436,7 +1438,87 @@ export default function ProjectDetails() {
                     </button>
                   </div>
                 )}
+                {contractModalTab === 'encaissement' && (
+                <>
+                {/* BANDEAU ENCAISSEMENTS */}
+                {(() => {
+                   const contractEncs = (project.encaissements || []).filter(e => 
+                      e.contractId === currentContract.id || 
+                      (!e.contractId && e.mode === currentContract.mode && (
+                        (e.year === 1 && (currentContract.name.includes('Annuelle') || currentContract.name === 'Maintenance')) ||
+                        (e.year && currentContract.name.includes(e.year.toString())) ||
+                        !e.year
+                      )) // Fallback for old data
+                   ).sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime());
 
+                   if (contractEncs.length === 0) return null;
+
+                   return (
+                     <div className="mt-8 border-t border-slate-100 pt-6 relative z-10">
+                       <h4 className="font-extrabold text-slate-800 text-sm mb-4 flex items-center gap-2">
+                         <Banknote className="w-4 h-4 text-emerald-500" />
+                         Encaissements liés à ce contrat
+                       </h4>
+                       <div className="space-y-3">
+                         {contractEncs.map(enc => (
+                           <div key={enc.id} className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 border border-slate-100 p-4 rounded-xl gap-4 hover:border-slate-300 transition-colors">
+                             <div>
+                               <div className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                                 {enc.encaissementType === 'TOTAL' ? 'Solde' : enc.encaissementType === 'AVANCE' ? 'Avance' : enc.mode}
+                                 {enc.year ? ` (Année ${enc.year})` : ''}
+                                 <span className={cn(
+                                   "px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider",
+                                   enc.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' :
+                                   (enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL') ? 'bg-blue-100 text-blue-700' :
+                                   enc.status === 'CANCELED' ? 'bg-slate-100 text-slate-400 line-through' :
+                                   'bg-slate-200 text-slate-600'
+                                 )}>
+                                   {enc.status === 'DONE' ? 'Payé' : enc.status === 'IN_PROGRESS' ? 'En cours' : enc.status === 'PARTIAL' ? 'Partiel' : enc.status === 'CANCELED' ? 'Ignoré' : 'Attente'}
+                                 </span>
+                               </div>
+                               <div className={cn("text-[11px] font-semibold text-slate-500 mt-1", enc.status === 'CANCELED' && "opacity-50")}>
+                                 Cible : {enc.targetDate ? new Date(enc.targetDate).toLocaleDateString('fr-FR') : 'Non définie'}
+                                 {enc.montantTotal ? ` • ${enc.montantTotal.toLocaleString('fr-DZ')} DA` : ''}
+                                 {enc.isCombined && ` • (Dans un dossier fusionné)`}
+                               </div>
+                             </div>
+                             <div className="flex items-center gap-2 shrink-0">
+                               {(enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL') && (
+                                 <div className="flex items-center gap-1.5">
+                                   {enc.mode === 'Maintenance' && (
+                                     <button
+                                       onClick={() => deactivateMaintenanceEncaissement(project.id, enc.id)}
+                                       className="px-3 py-2 bg-white border border-red-200 hover:border-red-300 text-red-600 rounded-lg text-xs font-bold shadow-sm transition-colors"
+                                       title="Annuler l'activation de cette maintenance"
+                                     >
+                                       Désactiver
+                                     </button>
+                                   )}
+                                   <button
+                                     onClick={() => setShowFacturation(enc.combinedWithDossierId || enc.id)}
+                                     className="px-4 py-2 bg-white border border-slate-200 hover:border-blue-300 text-blue-600 rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
+                                   >
+                                     Gérer
+                                   </button>
+                                 </div>
+                               )}
+                               {enc.status === 'UPCOMING' && (
+                                 <button
+                                   onClick={() => activateMaintenanceEncaissement(project.id, enc.id)}
+                                   className="px-4 py-2 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg text-xs font-bold transition-colors"
+                                 >
+                                   Activer
+                                 </button>
+                               )}
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                   );
+                 })()}
+                 </>
+                )}
               </div>
             </div>
           </div>
@@ -1587,61 +1669,256 @@ export default function ProjectDetails() {
       )}
 
       {/* Add New Annexe */}
-      {showNewAnnexeModal && (
+      {/* Add New Contract (Indépendant) */}
+      {showNewContractModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={(e) => {
             e.preventDefault();
-            if (newAnnexeName.trim() && newAnnexePrice !== '') {
-              addAnnexeContract(project.id, newAnnexeName.trim(), newAnnexeAttachedContractId || undefined, parseFloat(newAnnexePrice));
-              setNewAnnexeName('');
-              setNewAnnexePrice('');
-              setNewAnnexeAttachedContractId('');
-              setShowNewAnnexeModal(false);
+            if (newContractName.trim()) {
+              addCustomContract(project.id, newContractName.trim(), newContractPrice ? parseFloat(newContractPrice) : undefined);
+              setNewContractName('');
+              setNewContractPrice('');
+              setShowNewContractModal(false);
             }
           }} className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-md">
-            <button type="button" onClick={() => setShowNewAnnexeModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
-            <h3 className="font-extrabold text-slate-900 text-base mb-5">Ajouter une prestation annexe</h3>
+            <button type="button" onClick={() => setShowNewContractModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
+            <h3 className="font-extrabold text-slate-900 text-base mb-5">Ajouter un contrat indépendant</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Nom de la prestation</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Nom du contrat</label>
                 <input
                   type="text"
-                  value={newAnnexeName}
-                  onChange={e => setNewAnnexeName(e.target.value)}
+                  value={newContractName}
+                  onChange={e => setNewContractName(e.target.value)}
                   placeholder="Ex: Matériel Serveur, Formation..."
                   required
                   className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Attacher au contrat (Optionnel)</label>
-                <select
-                  value={newAnnexeAttachedContractId}
-                  onChange={e => setNewAnnexeAttachedContractId(e.target.value)}
-                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
-                >
-                  <option value="">-- Aucun contrat (Indépendant) --</option>
-                  {project.contracts?.filter(c => c.status !== 'DONE' && c.status !== 'ABANDONED' && c.mode !== 'Annexe').map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Prix HT (DA)</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Prix HT (DA) - Optionnel</label>
                 <input
                   type="number"
-                  value={newAnnexePrice}
-                  onChange={e => setNewAnnexePrice(e.target.value)}
+                  value={newContractPrice}
+                  onChange={e => setNewContractPrice(e.target.value)}
                   placeholder="Ex: 50000"
-                  required
                   min="0"
                   className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
             </div>
             <div className="flex justify-end gap-3 pt-6 mt-4 border-t border-slate-100">
-              <button type="button" onClick={() => setShowNewAnnexeModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Annuler</button>
+              <button type="button" onClick={() => setShowNewContractModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Annuler</button>
               <button type="submit" className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md">Ajouter</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Add New Encaissement */}
+      {showNewEncaissementModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const targetContract = newEncaissementIsLinked ? contractsList.find(c => c.id === newEncaissementContractId) : null;
+            if (newEncaissementTargetDate) {
+              const encMode = targetContract ? targetContract.mode : 'Indépendant';
+              
+              const finalProduct = newEncaissementIsLinked ? project.product : newEncaissementProduct;
+              const finalVersion = newEncaissementIsLinked ? project.version : newEncaissementVersion;
+
+              let calculatedPrice = 0;
+              if (finalProduct && finalVersion) {
+                calculatedPrice = getPrice(finalProduct, finalVersion as ProductVersion, encMode || 'Acquisition', client, project);
+              }
+              const finalMontantTotal = newEncaissementType === 'AVANCE' ? (calculatedPrice * newEncaissementPercentage) / 100 : calculatedPrice;
+
+              const newEnc = {
+                 id: uuidv4(),
+                 projectId: project.id,
+                 contractId: targetContract ? targetContract.id : undefined,
+                 mode: encMode,
+                 title: !targetContract ? newEncaissementTitle : undefined,
+                 product: finalProduct,
+                 version: finalVersion as ProductVersion,
+                 montantTotal: finalMontantTotal,
+                 encaissementType: newEncaissementType,
+                 billingMode: newEncaissementBillingMode,
+                 targetDate: newEncaissementTargetDate,
+                 percentage: newEncaissementType === 'AVANCE' ? newEncaissementPercentage : undefined,
+                 status: 'IN_PROGRESS' as const,
+                 proforma: { status: 'PENDING' as const },
+                 soumission: { status: 'PENDING' as const },
+                 convention: { status: 'PENDING' as const },
+                 bc: { status: 'PENDING' as const },
+                 serviceFait: { status: 'PENDING' as const },
+                 abe: { status: 'PENDING' as const },
+                 facture: { status: 'PENDING' as const }
+              };
+              let updatedEncaissements = [...(project.encaissements || [])];
+              
+              if (targetContract && newEncaissementType === 'TOTAL') {
+                 updatedEncaissements = updatedEncaissements.map(enc => {
+                    if (enc.contractId === targetContract.id && enc.encaissementType === 'AVANCE' && enc.status !== 'DONE') {
+                       return { ...enc, status: 'CANCELED' as any };
+                    }
+                    return enc;
+                 });
+              }
+              
+              updatedEncaissements.push(newEnc as any);
+
+              updateProject(project.id, {
+                 encaissements: updatedEncaissements
+              });
+              setNewEncaissementTargetDate('');
+              setNewEncaissementType('AVANCE');
+              setNewEncaissementBillingMode('FACTURE');
+              setNewEncaissementTitle('');
+              setNewEncaissementPercentage(30);
+              setShowNewEncaissementModal(false);
+            }
+          }} className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-md">
+            <button type="button" onClick={() => setShowNewEncaissementModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
+            <h3 className="font-extrabold text-slate-900 text-base mb-5">Ajouter un Encaissement</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Liaison</label>
+                <div className="flex bg-slate-100 p-1 rounded-xl">
+                   <button type="button" onClick={() => setNewEncaissementIsLinked(true)} className={cn("flex-1 text-xs font-bold py-2 rounded-lg transition-colors", newEncaissementIsLinked ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:text-slate-700")}>
+                     Lié au contrat
+                   </button>
+                   <button type="button" onClick={() => setNewEncaissementIsLinked(false)} className={cn("flex-1 text-xs font-bold py-2 rounded-lg transition-colors", !newEncaissementIsLinked ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:text-slate-700")}>
+                     Indépendant
+                   </button>
+                </div>
+              </div>
+
+              {newEncaissementIsLinked && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Contrat à lier</label>
+                  <select
+                    value={newEncaissementContractId}
+                    onChange={e => setNewEncaissementContractId(e.target.value)}
+                    required
+                    className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="" disabled>Sélectionnez un contrat</option>
+                    {contractsList.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!newEncaissementIsLinked && (
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Produit</label>
+                    <select
+                      value={newEncaissementProduct}
+                      onChange={e => setNewEncaissementProduct(e.target.value)}
+                      required
+                      className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="" disabled>Sélectionner le produit</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Version</label>
+                    <select
+                      value={newEncaissementVersion}
+                      onChange={e => setNewEncaissementVersion(e.target.value as ProductVersion)}
+                      required
+                      className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="" disabled>Version</option>
+                      <option value="ULTRALIGHT">UltraLight</option>
+                      <option value="LIGHT">Light</option>
+                      <option value="INTERMEDIATE">Intermediate</option>
+                      <option value="ADVANCED">Advanced</option>
+                      <option value="GLOBAL">Global</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {(!newEncaissementIsLinked) && (
+                <div className="mb-4 p-3 bg-amber-50 text-amber-700 text-xs font-bold rounded-xl border border-amber-200">
+                  Cet encaissement sera indépendant et possèdera sa propre carte.
+                </div>
+              )}
+
+              {!newEncaissementIsLinked && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Titre de l'encaissement</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Avance exceptionnelle, Prestation additionnelle..."
+                    value={newEncaissementTitle}
+                    onChange={e => setNewEncaissementTitle(e.target.value)}
+                    className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
+              
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Type</label>
+                  <select
+                    value={newEncaissementType}
+                    onChange={e => setNewEncaissementType(e.target.value as 'AVANCE' | 'TOTAL')}
+                    className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="AVANCE">Avance</option>
+                    <option value="TOTAL">Total (Solde)</option>
+                  </select>
+                </div>
+                {newEncaissementType === 'AVANCE' && (
+                  <div className="w-24">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">% Avance</label>
+                    <input
+                      type="number"
+                      min="1" max="100"
+                      value={newEncaissementPercentage}
+                      onChange={e => setNewEncaissementPercentage(Number(e.target.value))}
+                      required
+                      className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Mode de facturation</label>
+                <select
+                  value={newEncaissementBillingMode}
+                  onChange={e => setNewEncaissementBillingMode(e.target.value as 'FACTURE' | 'PARTIEL')}
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="FACTURE">Facturé (Parcours complet Docs)</option>
+                  <option value="PARTIEL">Partiel (Paiement informel, pas de docs)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Date cible</label>
+                <input
+                  type="date"
+                  value={newEncaissementTargetDate}
+                  onChange={e => setNewEncaissementTargetDate(e.target.value)}
+                  required
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-6 mt-4 border-t border-slate-100">
+              <button type="button" onClick={() => setShowNewEncaissementModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Annuler</button>
+              <button type="submit" className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md">Ajouter</button>
             </div>
           </form>
         </div>
@@ -1737,50 +2014,54 @@ export default function ProjectDetails() {
               <div className="flex-1 overflow-y-auto pr-2 space-y-8">
                 <div className="space-y-4">
                   {activeEncaissementsList.map(enc => {
-                    let contractDocs: { id: string, name: string, isMissing: boolean, onToggle: () => void }[] = [];
                     let contractTitle: string = enc.mode;
+                    if (enc.mode === 'Maintenance') contractTitle = enc.year !== undefined ? `Maintenance (Année ${enc.year})` : 'Maintenance';
+                    if (enc.title) contractTitle += ` - ${enc.title}`;
 
-                    if (enc.mode === 'Acquisition') {
-                      if (acquisitionContract && encaissementPhase) {
-                        contractDocs = (encaissementPhase.tasks || []).map(t => ({
-                          id: t.id,
-                          name: t.name,
-                          isMissing: t.status === 'PENDING' || t.status === 'IN_PROGRESS',
-                          onToggle: () => {
-                            const newStatus = (t.status === 'PENDING' || t.status === 'IN_PROGRESS') ? 'DONE' : 'PENDING';
-                            updateTaskInContract(project.id, acquisitionContract.id, encaissementPhase.id, t.id, { status: newStatus as any });
-                          }
-                        }));
+                    let contractDocs = [
+                      {
+                        id: 'soumission',
+                        name: 'Soumission',
+                        isMissing: enc.soumission?.status !== 'VALIDATED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { soumission: { ...(enc.soumission || {}), status: enc.soumission?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                      },
+                      {
+                        id: 'convention',
+                        name: 'Convention',
+                        isMissing: enc.convention?.status !== 'VALIDATED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { convention: { ...(enc.convention || {}), status: enc.convention?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                      },
+                      {
+                        id: 'proforma',
+                        name: 'Proforma',
+                        isMissing: enc.proforma?.status !== 'VALIDATED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                      },
+                      {
+                        id: 'bc',
+                        name: 'Bon de Commande',
+                        isMissing: enc.bc?.status !== 'RECOVERED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: enc.bc?.status !== 'RECOVERED' ? 'RECOVERED' : 'PENDING' } as any })
+                      },
+                      {
+                        id: 'service_fait',
+                        name: 'Service fait',
+                        isMissing: enc.serviceFait?.status !== 'RECOVERED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { serviceFait: { ...(enc.serviceFait || {}), status: enc.serviceFait?.status !== 'RECOVERED' ? 'RECOVERED' : 'PENDING' } as any })
+                      },
+                      {
+                        id: 'facture',
+                        name: 'Facture définitive',
+                        isMissing: enc.facture?.status !== 'VALIDATED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture?.status !== 'VALIDATED' ? 'VALIDATED' : 'PENDING' } as any })
+                      },
+                      {
+                        id: 'abe',
+                        name: 'ABE',
+                        isMissing: enc.abe?.status !== 'RECOVERED',
+                        onToggle: () => updateEncaissement(project.id, enc.id, { abe: { ...(enc.abe || {}), status: enc.abe?.status !== 'RECOVERED' ? 'RECOVERED' : 'PENDING' } as any })
                       }
-                    } else if (enc.mode === 'Maintenance') {
-                      contractTitle = enc.year !== undefined ? `Maintenance (Année ${enc.year})` : 'Maintenance';
-                      contractDocs = [
-                        {
-                          id: 'proforma',
-                          name: 'Proforma',
-                          isMissing: enc.proforma?.status === 'PENDING',
-                          onToggle: () => updateEncaissement(project.id, enc.id, { proforma: { ...enc.proforma, status: enc.proforma?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
-                        },
-                        {
-                          id: 'bc',
-                          name: 'Bon de Commande',
-                          isMissing: enc.bc?.status === 'PENDING',
-                          onToggle: () => updateEncaissement(project.id, enc.id, { bc: { ...enc.bc, status: enc.bc?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
-                        },
-                        {
-                          id: 'facture',
-                          name: 'Facture définitive',
-                          isMissing: enc.facture?.status === 'PENDING',
-                          onToggle: () => updateEncaissement(project.id, enc.id, { facture: { ...enc.facture, status: enc.facture?.status === 'PENDING' ? 'DONE' : 'PENDING' } })
-                        },
-                        {
-                          id: 'service_fait',
-                          name: 'Service fait',
-                          isMissing: enc.status !== 'DONE',
-                          onToggle: () => updateEncaissement(project.id, enc.id, { status: enc.status !== 'DONE' ? 'DONE' : 'IN_PROGRESS' })
-                        }
-                      ];
-                    }
+                    ];
 
                     const missingCount = contractDocs.filter(d => d.isMissing).length;
 
@@ -1830,7 +2111,7 @@ export default function ProjectDetails() {
       })()}
 
       {/* NEW MODAL: Facturation */}
-      {showFacturation && typeof showFacturation === 'string' && dossiersPaiement.some(d => d.id === showFacturation) ? (
+      {showFacturation && typeof showFacturation === 'string' ? (
         <FacturationDossierModal
           dossierId={showFacturation}
           client={client}
@@ -1839,17 +2120,23 @@ export default function ProjectDetails() {
             projects.forEach(p => {
               p.encaissements?.forEach(e => allEncs.push({ ...e, projectId: p.id, projectName: p.name, product: p.product }));
             });
-            return allEncs.filter(e => e.isCombined && (e.combinedWithDossierId === showFacturation || (e as any).dossierId === showFacturation)).sort((a, b) => {
-              const modeA = a.mode;
-              const modeB = b.mode;
-              if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
-              if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
-              return 0;
-            });
+            
+            const combined = allEncs.filter(e => e.isCombined && (e.combinedWithDossierId === showFacturation || (e as any).dossierId === showFacturation));
+            if (combined.length > 0) {
+              return combined.sort((a, b) => {
+                const modeA = a.mode;
+                const modeB = b.mode;
+                if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
+                if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
+                return 0;
+              });
+            }
+            
+            return allEncs.filter(e => e.id === showFacturation);
           })()}
           onClose={() => setShowFacturation(false)}
         />
-      ) : showFacturation && (
+      ) : showFacturation === true && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-4xl max-h-[90vh] flex flex-col justify-between overflow-hidden">
             <button type="button" onClick={() => setShowFacturation(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
@@ -2107,10 +2394,9 @@ export default function ProjectDetails() {
                                 </div>
                                 <h4 className="font-black text-purple-900 text-lg">Dossier Fusionné</h4>
                                 <button
-                                  onClick={() => {
-                                    if (window.confirm("Êtes-vous sûr de vouloir dissocier ce dossier ? Les encaissements redeviendront indépendants.")) {
-                                      dissociateDossier(dossier.id);
-                                    }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDossierToDissociate(dossier.id);
                                   }}
                                   className="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors ml-2"
                                 >
@@ -2313,13 +2599,23 @@ export default function ProjectDetails() {
             const p = projects.find(pr => pr.id === e.projectId);
             const prod = p?.product || project.product;
             const vers = p?.version || project.version;
-            const price = getPrice(prod, vers, e.mode);
+            const price = getPrice(prod, vers, e.mode, client, project);
             totalHT += price;
 
             const versionStr = vers ? `, Version ${vers}` : '';
             const title = `Logiciel ${prod}${versionStr}`;
             const subtitle = e.mode === 'Acquisition' ? 'Acquisition' : `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
-            const description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle (Heures de bureau, Du Dimanche au Jeudi)\n• Télé-intervention annuelle (Heures de bureau, Du Dimanche au Jeudi)`.trim();
+            let description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle (Heures de bureau, Du Dimanche au Jeudi)\n• Télé-intervention annuelle (Heures de bureau, Du Dimanche au Jeudi)`.trim();
+
+            if (price === 0) {
+               const prodConfig = useStore.getState().products.find(p => p.name.toLowerCase() === prod.toLowerCase());
+               description += `\n\n[ERREUR PRIX: 0 DA] Vérifiez la Règle Tarifaire.\nProduit cherché: '${prod}' (Version: '${vers}').\nEntité projet: '${project.entity}'.\nClient: Effectif=${client?.effectif}, Type=${client?.effectifType}.`;
+               if (prodConfig) {
+                 description += `\nRègles trouvées pour ce produit : ${prodConfig.pricingRules.length}\nVeuillez vérifier qu'une des règles correspond EXACTEMENT à ces critères.`;
+               } else {
+                 description += `\nLe produit '${prod}' n'a pas été trouvé.`;
+               }
+            }
 
             return {
               description,
@@ -2408,6 +2704,56 @@ export default function ProjectDetails() {
           />
         );
       })()}
+
+      {/* Dissociation Modal */}
+      {dossierToDissociate && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-8 relative w-full max-w-lg flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <FolderKanban className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-xl">Dissocier le dossier</h3>
+                <p className="text-xs font-bold text-slate-500 mt-1">Que souhaitez-vous faire des proformas ?</p>
+              </div>
+            </div>
+            
+            <p className="text-sm font-semibold text-slate-700 mb-8 leading-relaxed">
+              La dissociation annulera la proforma fusionnée. Souhaitez-vous restaurer les anciennes proformas individuelles générées avant la fusion avec leurs numéros d'origine, ou les laisser annulées pour en générer de nouvelles ?
+            </p>
+            
+            <div className="flex flex-col gap-3 mt-auto">
+              <button
+                onClick={() => {
+                  dissociateDossier(dossierToDissociate, true);
+                  setDossierToDissociate(null);
+                }}
+                className="w-full px-5 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Accepter : Restaurer les anciennes proformas
+              </button>
+              <button
+                onClick={() => {
+                  dissociateDossier(dossierToDissociate, false);
+                  setDossierToDissociate(null);
+                }}
+                className="w-full px-5 py-3.5 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Refuser : Laisser annulé (à regénérer)
+              </button>
+              <button
+                onClick={() => setDossierToDissociate(null)}
+                className="w-full px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-all"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

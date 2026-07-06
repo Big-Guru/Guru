@@ -26,7 +26,7 @@ const TECH_COLLABS = ["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"];
 
 export default function ClientDetails() {
   const { id } = useParams<{ id: string }>();
-  const { clients, projects, addProject, deleteProject, dossiersPaiement, addDossierPaiement, updateEncaissement, deleteDossierPaiement, dissociateDossier } = useStore();
+  const { clients, projects, products, addProject, deleteProject, dossiersPaiement, updateDossierPaiement, addDossierPaiement, updateEncaissement, deleteDossierPaiement, dissociateDossier } = useStore();
   const [showFusionModal, setShowFusionModal] = useState(false);
   const [selectedFusionGroup, setSelectedFusionGroup] = useState<any[] | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
@@ -47,6 +47,7 @@ export default function ClientDetails() {
     phase: 'Démarchage',
     status: 'Actif',
     technique: [] as string[],
+    maintenancePeriodicity: 'Annuelle',
     createdAt: new Date().toISOString().split('T')[0]
   });
   
@@ -164,12 +165,13 @@ export default function ClientDetails() {
       processType: newProjectData.processType as any,
       technique: newProjectData.technique,
       createdAt: newProjectData.createdAt,
-      installationDate: newProjectData.createdAt
+      installationDate: newProjectData.createdAt,
+      maintenancePeriodicity: newProjectData.maintenancePeriodicity as any
     });
     setShowNewProject(false);
     setNewProjectData({ 
       name: '', departement: 'D1', product: 'PAYE', version: 'LIGHT', processType: 'STANDARD', wilaya: '', ville: '', 
-      entity: 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [],
+      entity: 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [], maintenancePeriodicity: 'Annuelle',
       createdAt: new Date().toISOString().split('T')[0]
     });
   };
@@ -250,8 +252,8 @@ export default function ClientDetails() {
 
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mt-4">
             <div className="inline-flex items-center gap-2 bg-white/60 backdrop-blur-sm px-4 py-2 rounded-2xl border border-white text-xs font-extrabold text-slate-700 shadow-sm">
-               <Users2 className="w-4.5 h-4.5 text-blue-500" />
-               <span>{client.effectif} {client.effectifType === 'SALARIES' ? 'Salariés' : 'Étudiants'}</span>
+               <Users2 className="w-4 h-4 text-indigo-500 shrink-0" />
+              <span>{client.effectif} {client.effectifType === 'UNIVERSITE' ? 'Université' : 'EH/DA'}</span>
             </div>
             
             {/* Fiscal metadata tags */}
@@ -277,14 +279,53 @@ export default function ClientDetails() {
             </h3>
             <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Gérez et consultez tous les projets de ce client</p>
           </div>
-          {!showNewProject && (
-            <button 
-              onClick={() => setShowNewProject(true)}
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold rounded-xl shadow-sm hover:opacity-95 transition-all duration-200"
-            >
-              <Plus className="w-3.5 h-3.5" /> Nouveau Projet
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {manualFusionSelection.length >= 2 && (
+              <button
+                disabled={isCreatingDossier}
+                onClick={() => handleCreateDossier(manualFusionSelection)}
+                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ${isCreatingDossier ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:opacity-95'}`}
+              >
+                <FolderKanban className="w-3.5 h-3.5" />
+                {isCreatingDossier ? 'Création...' : `Fusionner (${manualFusionSelection.length})`}
+              </button>
+            )}
+            {!showNewProject && (
+              <button 
+                onClick={() => {
+                  if (products && products.length > 0) {
+                    const firstProd = products[0];
+                    setNewProjectData({
+                      name: '',
+                      departement: firstProd.departement,
+                      product: firstProd.name as any,
+                      version: 'LIGHT',
+                      processType: 'STANDARD',
+                      wilaya: '',
+                      ville: '',
+                      entity: firstProd.defaultEntity,
+                      mode: 'Acquisition',
+                      phase: 'Démarchage',
+                      status: 'Actif',
+                      technique: [],
+                      maintenancePeriodicity: firstProd.maintenancePeriodicity as any,
+                      createdAt: new Date().toISOString().split('T')[0]
+                    });
+                  } else {
+                    setNewProjectData({ 
+                      name: '', departement: 'D1', product: 'PAYE' as any, version: 'LIGHT', processType: 'STANDARD', wilaya: '', ville: '', 
+                      entity: 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [], maintenancePeriodicity: 'Annuelle',
+                      createdAt: new Date().toISOString().split('T')[0]
+                    });
+                  }
+                  setShowNewProject(true);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold rounded-xl shadow-sm hover:opacity-95 transition-all duration-200"
+              >
+                <Plus className="w-3.5 h-3.5" /> Nouveau Projet
+              </button>
+            )}
+          </div>
         </div>
 
         <div>
@@ -296,130 +337,314 @@ export default function ClientDetails() {
                 <p className="text-xs text-slate-450 mt-1">Créez le premier projet client pour commencer le suivi.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="flex flex-col gap-8">
                 {clientProjects.map((project, index) => {
-                  const alerts = calculateAlerts(project);
-                  const critCount = alerts.filter(a => a.level === 'CRITICAL').length;
-                  const warnCount = alerts.filter(a => a.level === 'WARNING').length;
+                  const contractsList = project.contracts || [];
+                  const activeList = contractsList.filter(c => c.status === 'ACTIVE');
+                  const activeIndependentEncaissements = (project.encaissements || []).filter(e => e.mode === 'Indépendant');
+
+                  const activeGroups: { parent: any, annexes: any[] }[] = [];
+                  const standaloneActive: any[] = [];
+                  const mainActive = activeList.filter(c => c.mode !== 'Annexe');
+                  const activeAnnexes = activeList.filter(c => c.mode === 'Annexe');
+
+                  mainActive.forEach(parent => {
+                     activeGroups.push({ parent, annexes: [] });
+                  });
+
+                  activeAnnexes.forEach(annexe => {
+                     const targetParentGroup = activeGroups.find(g => g.parent.mode === 'Acquisition') || 
+                                               activeGroups.find(g => g.parent.mode === 'Maintenance') || 
+                                               activeGroups[0];
+                     if (targetParentGroup) {
+                       targetParentGroup.annexes.push(annexe);
+                     } else {
+                       standaloneActive.push(annexe);
+                     }
+                  });
                   
-                  return (
-                    <Link 
-                      key={`${project.id}-${index}`} 
-                      to={`/projects/${project.id}`}
-                      state={{ fromClientId: id }}
-                      className="group relative flex flex-col bg-white rounded-[28px] border border-slate-200/80 shadow-md shadow-slate-200/30 hover:shadow-2xl hover:shadow-blue-500/20 hover:-translate-y-1.5 hover:border-blue-300 transition-all duration-500 overflow-hidden"
-                    >
-                      {/* Decorative Background Elements */}
-                      <div className="absolute -right-8 -top-8 w-40 h-40 bg-gradient-to-br from-blue-100/50 to-purple-100/50 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700 ease-out pointer-events-none" />
-                      <div className="absolute -left-8 -bottom-8 w-40 h-40 bg-gradient-to-br from-emerald-100/30 to-teal-100/30 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700 ease-out pointer-events-none" />
+                  activeIndependentEncaissements.forEach(enc => {
+                    standaloneActive.push({ ...enc, isEncaissementCard: true, name: enc.title || 'Encaissement' });
+                  });
+
+                  const allActiveGroups = [...activeGroups];
+                  standaloneActive.forEach(a => allActiveGroups.push({ parent: a, annexes: [] }));
+
+                  const renderCard = (card: any, extraClasses: string = "") => {
+                    if (card.isEncaissementCard) {
+                      const isDone = card.status === 'DONE';
                       
-                      <div className="p-6 flex flex-col flex-1 relative z-10 h-full">
-                         {/* Top row: Badges */}
-                         <div className="flex justify-between items-start mb-6">
-                            <div className="flex items-center gap-2">
-                               <span className={cn("px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase border shadow-sm tracking-widest", getProductBadgeStyle(project.product))}>
-                                 {project.product}
-                               </span>
-                               <span className={cn("px-2.5 py-0.5 rounded-lg text-[8px] font-bold uppercase border tracking-widest", getVersionBadgeStyle(project.version))}>
-                                 {project.version}
-                               </span>
+                      return (
+                        <div
+                          key={card.id}
+                          className={cn(
+                            "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-500 border overflow-hidden relative group",
+                            "bg-cyan-400 backdrop-blur-xl border-cyan-300 shadow-cyan-500/20",
+                            extraClasses
+                          )}
+                        >
+                          {card.status !== 'DONE' && (
+                            <div className="absolute top-4 right-4 z-20">
+                              {(card.isCombined || card.combinedWithDossierId) ? (
+                                <div className="w-4 h-4 rounded-full bg-cyan-100/50 shadow-sm border border-white" title="Inclus dans un dossier d'encaissement" />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const isChecked = manualFusionSelection.some((item: any) => item.id === card.id);
+                                    if (!isChecked) {
+                                      setManualFusionSelection([...manualFusionSelection, { ...card, projectId: project.id }]);
+                                    } else {
+                                      setManualFusionSelection(manualFusionSelection.filter((item: any) => item.id !== card.id));
+                                    }
+                                  }}
+                                  className={cn(
+                                    "w-5 h-5 rounded-full border-2 transition-all hover:scale-110 shadow-sm flex items-center justify-center",
+                                    manualFusionSelection.some((e: any) => e.id === card.id)
+                                      ? "bg-white border-white text-cyan-500" 
+                                      : "bg-white/20 border-white text-transparent hover:bg-white/30"
+                                  )}
+                                  title="Sélectionner pour fusion"
+                                >
+                                  {manualFusionSelection.some((e: any) => e.id === card.id) && (
+                                    <svg viewBox="0 0 14 14" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M3 7.5L5.5 10L11 4" />
+                                    </svg>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <div className="relative z-10 flex flex-col h-full pt-1 w-full">
+                            <div className="flex items-start justify-between w-full">
+                              <div className="flex items-start gap-2">
+                                {isDone && <CheckCircle2 className="w-5 h-5 text-cyan-100 shrink-0 mt-0.5" />}
+                                <h4 className="font-extrabold text-[22px] tracking-tight leading-none mb-1.5 text-white pr-8">
+                                  {card.name}
+                                </h4>
+                              </div>
                             </div>
                             
-                            {/* Alert badges & Delete Action */}
-                            <div className="flex items-center gap-2 shrink-0">
-                              <div className="flex gap-1.5">
-                                {critCount > 0 && (
-                                  <span className="bg-red-500 text-white text-[10px] font-black uppercase px-2.5 py-1 rounded-xl shadow-md shadow-red-500/20 flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></span>
-                                    {critCount}
-                                  </span>
-                                )}
-                                {warnCount > 0 && critCount === 0 && (
-                                  <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-2.5 py-1 rounded-xl border border-amber-200 shadow-sm">
-                                    {warnCount}
-                                  </span>
-                                )}
+                            <span className="text-xs font-bold block mb-4 text-cyan-50 uppercase">
+                              Encaissement
+                            </span>
+                            
+                            <div className="flex justify-between items-end mt-auto w-full">
+                              <div className="flex flex-col gap-2.5">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-100">
+                                  {card.targetDate ? `Cible: ${new Date(card.targetDate).toLocaleDateString('fr-FR')}` : 'Non défini'}
+                                </span>
+                                <div className="font-bold text-sm text-white">
+                                  {card.encaissementType === 'AVANCE' ? `Avance (${card.percentage || 30}%)` : 'Total (Solde)'}
+                                </div>
                               </div>
-                              <button
-                                onClick={(e) => {
-                                  e.preventDefault();
+                              <div className="flex gap-2">
+                                {card.status !== 'DONE' && (
+                                  <button onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateProject(project.id, {
+                                      encaissements: (project.encaissements || []).map(enc => enc.id === card.id ? { ...enc, status: 'DONE' } : enc)
+                                    });
+                                  }} className="p-2 bg-white/20 text-white hover:bg-white/30 rounded-xl backdrop-blur-sm" title="Marquer comme Réglé">
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                )}
+                                <button onClick={(e) => {
                                   e.stopPropagation();
-                                  if (window.confirm('Voulez-vous vraiment supprimer ce projet ? Cette action est irréversible.')) {
-                                    deleteProject(project.id);
+                                  setSelectedDossierFacturationId(card.id);
+                                }} className="p-2 bg-white/20 text-white hover:bg-white/30 rounded-xl backdrop-blur-sm" title="Gérer le dossier">
+                                  <Banknote className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const isDone = card.status === 'DONE' || card.status === 'ABANDONED';
+                    const isPending = card.status === 'PENDING';
+                    
+                    const allEncaissementsForContract = (project.encaissements || []).filter(e => e.contractId === card.id);
+                    const activeEncaissements = allEncaissementsForContract.filter(e => e.status !== 'DONE');
+                    const hasActiveEncaissements = activeEncaissements.length > 0 && !isPending;
+                    const hasAnyEncaissement = allEncaissementsForContract.length > 0 && !isPending;
+
+                    const activePhaseIndex = card.phases ? card.phases.findIndex((p: any) => p.status !== 'DONE') : -1;
+                    const actualPhaseIndex = activePhaseIndex === -1 && card.phases && card.phases.length > 0 ? card.phases.length - 1 : Math.max(0, activePhaseIndex);
+                    const activePhase = card.phases?.[actualPhaseIndex];
+                    const currentPhaseCount = card.phases && card.phases.length > 0 ? actualPhaseIndex + 1 : 0;
+                    const totalPhasesCount = card.phases?.length || 0;
+
+                    let colorClasses = "";
+                    if (card.mode === 'Acquisition') {
+                      colorClasses = "bg-blue-50 backdrop-blur-xl border-blue-200/60 shadow-blue-500/10";
+                    } else if (card.mode === 'Maintenance offerte') {
+                      colorClasses = "bg-red-50 backdrop-blur-xl border-red-200/60 shadow-red-500/10";
+                    } else if (card.mode === 'Annexe') {
+                      colorClasses = "bg-amber-50 backdrop-blur-xl border-amber-200/60 shadow-amber-500/10";
+                    } else {
+                      colorClasses = "bg-emerald-50 backdrop-blur-xl border-emerald-200/60 shadow-emerald-500/10";
+                    }
+
+                    return (
+                      <div
+                        key={card.id}
+                        className={cn(
+                          "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[280px] h-[190px] text-left transition-all duration-500 border overflow-hidden relative group",
+                          "bg-violet-50 backdrop-blur-xl border-violet-200/60 shadow-violet-500/10",
+                          extraClasses,
+                          hasAnyEncaissement ? "pr-11" : ""
+                        )}
+                      >
+                        {hasAnyEncaissement && (
+                          <div className="absolute right-0 top-0 bottom-0 w-9 bg-cyan-400 flex items-center justify-center z-20 shadow-[-2px_0_10px_rgba(34,211,238,0.2)]">
+                            <span className="text-white font-black text-[11px] tracking-[0.15em] uppercase" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                              Encaissement
+                            </span>
+                          </div>
+                        )}
+                        {hasActiveEncaissements && (
+                          <div className="absolute top-4 right-0 w-9 flex justify-center z-30">
+                            {activeEncaissements.some((e: any) => e.isCombined || e.combinedWithDossierId) ? (
+                              <div className="w-4 h-4 rounded-full bg-violet-500 border-2 border-white shadow-sm" title="Inclus dans un dossier d'encaissement" />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const isChecked = manualFusionSelection.some((item: any) => item.id === card.id);
+                                  if (!isChecked) {
+                                    setManualFusionSelection([...manualFusionSelection, { ...card, projectId: project.id }]);
+                                  } else {
+                                    setManualFusionSelection(manualFusionSelection.filter((item: any) => item.id !== card.id));
                                   }
                                 }}
-                                className="p-1.5 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                title="Supprimer le projet"
+                                className={cn(
+                                  "w-4 h-4 rounded-full border-2 transition-all hover:scale-110 shadow-sm flex items-center justify-center",
+                                  manualFusionSelection.some((e: any) => e.id === card.id)
+                                    ? "bg-blue-500 border-blue-500 text-white" 
+                                    : "bg-white border-white text-transparent hover:border-blue-300"
+                                )}
+                                title="Sélectionner pour fusion"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                {manualFusionSelection.some((e: any) => e.id === card.id) && (
+                                  <svg viewBox="0 0 14 14" fill="none" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 7.5L5.5 10L11 4" />
+                                  </svg>
+                                )}
                               </button>
+                            )}
+                          </div>
+                        )}
+                        
+                        <div className={cn("absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-blue-100' : card.mode === 'Maintenance offerte' ? 'bg-red-100' : 'bg-green-100')}></div>
+                        <div className={cn("absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none", card.mode === 'Acquisition' ? 'bg-indigo-100' : card.mode === 'Maintenance offerte' ? 'bg-orange-100' : 'bg-emerald-100')}></div>
+
+                        <div className="relative z-10 flex flex-col h-full pt-1 w-full">
+                          <div className="flex items-start justify-between w-full">
+                            <div className="flex items-start gap-2">
+                              {isDone && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+                              <h4 className={cn(
+                                "font-extrabold text-[22px] tracking-tight leading-none mb-1.5 transition-colors pr-8",
+                                card.mode === 'Acquisition' ? "text-blue-900" : card.mode === 'Maintenance offerte' ? "text-red-900" : "text-green-900"
+                              )}>
+                                {card.name}
+                              </h4>
                             </div>
-                         </div>
-
-                         {/* Title */}
-                         <h3 className="font-extrabold text-xl leading-tight text-slate-900 tracking-tight group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-blue-600 group-hover:to-indigo-600 transition-all duration-300 mb-2">
-                           {project.name}
-                         </h3>
-
-                         {/* Installation Date */}
-                         <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 mb-6 group-hover:text-slate-500 transition-colors">
-                            <Clock className="w-3.5 h-3.5" />
-                            Installé le {new Date(project.installationDate).toLocaleDateString('fr-FR')}
-                         </div>
-
-                         {/* Bottom Section: Minimalist */}
-                         <div className="mt-auto pt-4 border-t border-slate-100/50 space-y-3">
-                           {project.contracts?.filter(c => c.status === 'ACTIVE').map(contract => {
-                              const activePhase = contract.phases?.find(p => p.status === 'ACTIVE') || contract.phases?.find(p => p.status === 'PENDING') || contract.phases?.[0];
-                              return (
-                                <div key={contract.id} className="flex flex-col">
-                                   <div className="text-sm font-extrabold text-slate-800">
-                                     {contract.name}
-                                   </div>
-                                   <div className="flex items-center gap-2 mt-0.5">
-                                     <span className="text-xs font-bold text-slate-500">
-                                       {activePhase?.name || 'Non définie'}
-                                     </span>
-                                     <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                     <span className={cn(
-                                       "px-1.5 py-0.5 rounded-md uppercase tracking-wider text-[9px] font-black",
-                                       project.status === 'Actif' ? "bg-emerald-50 text-emerald-600" :
-                                       project.status === 'Effectué' ? "bg-blue-50 text-blue-600" :
-                                       project.status === 'Suspendu' ? "bg-amber-50 text-amber-600" :
-                                       "bg-slate-50 text-slate-500"
-                                     )}>
-                                       {project.status}
-                                     </span>
-                                   </div>
-                                   {/* Petits points des tâches pour la phase active */}
-                                   {activePhase?.tasks && activePhase.tasks.length > 0 && (
-                                     <div className="flex gap-1 mt-2 w-full max-w-[120px]">
-                                       {activePhase.tasks.map((task, i) => (
-                                         <div 
-                                           key={i} 
-                                           title={`${task.name} : ${task.status}`}
-                                           className={cn(
-                                             "flex-1 h-1 rounded-full transition-all duration-300",
-                                             task.status === 'DONE' ? 'bg-emerald-400' : 
-                                             task.status === 'IN_PROGRESS' ? 'bg-blue-400 animate-pulse' : 
-                                             task.status === 'CANCELED' ? 'bg-red-400' :
-                                             'bg-slate-200'
-                                           )}
-                                         />
-                                       ))}
-                                     </div>
-                                   )}
+                          </div>
+                          {activePhase && (
+                            <span className="text-xs font-bold block mb-4 transition-colors text-slate-600">
+                              <span className="text-slate-900">{activePhase.name}</span>
+                            </span>
+                          )}
+                          <div className="flex justify-between items-end mt-auto w-full">
+                            <div className="flex flex-col gap-2.5">
+                              <span className="text-[10px] font-bold uppercase tracking-wider transition-colors text-slate-500">
+                                {(() => {
+                                  let displayDate = card.startDate;
+                                  if (!displayDate && card.mode === 'Maintenance') {
+                                    const match = card.name.match(/Année (\d+)/);
+                                    if (match) {
+                                      const year = parseInt(match[1], 10);
+                                      const enc = project.encaissements?.find(e => e.mode === 'Maintenance' && e.year === year);
+                                      if (enc?.targetDate) displayDate = enc.targetDate;
+                                    }
+                                  }
+                                  return displayDate ? `Début: ${new Date(displayDate).toLocaleDateString('fr-FR')}` : 'Non défini';
+                                })()}
+                              </span>
+                              {activePhase && activePhase.tasks && activePhase.tasks.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap max-w-[120px]">
+                                  {activePhase.tasks.map((t: any) => (
+                                    <div
+                                      key={t.id}
+                                      className={cn(
+                                        "w-2 h-2 rounded-full shadow-sm border border-black/5",
+                                        t.status === 'DONE' ? 'bg-emerald-400' :
+                                          t.status === 'IN_PROGRESS' ? 'bg-blue-400' :
+                                            'bg-slate-300'
+                                      )}
+                                      title={t.name}
+                                    />
+                                  ))}
                                 </div>
-                              );
-                           })}
-                           {(!project.contracts || project.contracts.filter(c => c.status === 'ACTIVE').length === 0) && (
-                              <div className="text-sm font-bold text-slate-500 italic">
-                                Aucun mode actif
-                              </div>
-                           )}
-                         </div>
+                              )}
+                            </div>
+                            <div className="text-sm font-extrabold transition-colors flex flex-col items-end gap-1 text-slate-800">
+                              <span>{currentPhaseCount}/{totalPhasesCount} <span className="text-[10px] uppercase font-bold opacity-70">Phases</span></span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </Link>
+                    );
+                  };
+
+                  return (
+                    <div key={project.id} className="flex bg-white rounded-[28px] border border-slate-200/80 shadow-md shadow-slate-200/30 overflow-hidden">
+                      {/* Vertical Project Header */}
+                      <Link 
+                        to={`/projects/${project.id}`} 
+                        state={{ fromClientId: id }}
+                        className="w-14 shrink-0 bg-gradient-to-b from-blue-600 to-indigo-600 flex flex-col justify-center items-center py-6 cursor-pointer hover:brightness-110 transition-all border-r border-indigo-700/50 group"
+                      >
+                         <div className="text-white font-black tracking-[0.2em] text-sm uppercase whitespace-nowrap group-hover:-translate-y-1 transition-transform" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                            {project.product || project.name}
+                         </div>
+                      </Link>
+                      
+                      {/* Scrollable Cards Container */}
+                      <div className="flex-1 overflow-x-auto flex flex-row items-center gap-5 p-6 bg-slate-50/50 hide-scrollbar">
+                        {allActiveGroups.length === 0 && (
+                          <div className="text-slate-400 text-sm font-semibold italic flex items-center h-full">
+                            Aucun contrat actif pour ce projet
+                          </div>
+                        )}
+                        {allActiveGroups.map((grp, idx) => (
+                         <div key={idx} className={cn(
+                           "relative flex flex-row items-center transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] hover:!z-50",
+                           grp.annexes.length > 0 ? "group/ministack -space-x-[224px] hover:space-x-5" : ""
+                         )} style={{ zIndex: 40 - idx }}>
+                           
+                           {/* Parent Contract */}
+                           <div className="relative shrink-0 z-20 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]">
+                             {renderCard(grp.parent)}
+                           </div>
+
+                           {/* Annexes */}
+                           {grp.annexes.map((annexe, aIdx) => (
+                              <div key={annexe.id} 
+                                   className="relative shrink-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]" 
+                                   style={{ zIndex: 19 - aIdx }}>
+                                 {renderCard(annexe)}
+                              </div>
+                           ))}
+
+                         </div>
+                        ))}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -437,7 +662,7 @@ export default function ClientDetails() {
                  </div>
                  <div className="flex-1">
                    <h3 className="text-base font-extrabold text-indigo-900 tracking-tight">Opportunité de Fusion !</h3>
-                   <p className="text-indigo-600/80 text-xs font-bold mt-0.5 leading-relaxed">Vous avez {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({group.map((g: any) => g.product).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
+                   <p className="text-indigo-600/80 text-xs font-bold mt-0.5 leading-relaxed">Vous avez {group.length} encaissements prévus en {new Date(monthYear + '-01').toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'})} ({Array.from(new Set(group.map((g: any) => `${g.product} - ${g.mode}`))).join(', ')}). Voulez-vous les regrouper dans un seul dossier de paiement ?</p>
                  </div>
               </div>
               <button 
@@ -450,264 +675,112 @@ export default function ClientDetails() {
           ))}
         </div>
       )}
-      {/* Liste des Encaissements Globaux du Client */}
-      <div className="mt-8 space-y-4">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h3 className="font-extrabold text-xl text-slate-900 flex items-center gap-3">
-              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-8 h-8 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
-                <Banknote className="w-4 h-4 text-white" />
+      {/* DOSSIERS FUSIONNÉS */}
+      {(() => {
+        const mergedDossiers = dossiersPaiement.filter(d => 
+          d.clientId === client.id && 
+          d.encaissementIds.length > 1
+        );
+        
+        if (mergedDossiers.length === 0) return null;
+
+        return (
+          <div className="mt-8 px-2 pb-8 border-t border-slate-100 pt-8 shrink-0">
+            <h3 className="font-extrabold text-slate-900 text-xl mb-6 flex items-center gap-3">
+              <div className="bg-violet-100 p-2 rounded-xl text-violet-600">
+                <Banknote className="w-5 h-5" />
               </div>
-              Tous les Encaissements du Client
+              Dossiers d'encaissement fusionnés
             </h3>
-            <p className="text-slate-500 text-sm mt-1 ml-11 font-semibold">Vision globale de toutes les acquisitions et maintenances</p>
-          </div>
-          {manualFusionSelection.length >= 2 && (
-            <button
-              disabled={isCreatingDossier}
-              onClick={() => handleCreateDossier(manualFusionSelection)}
-              className={`px-4 py-2 rounded-xl font-bold transition-colors shadow-sm flex items-center gap-2 text-sm ${isCreatingDossier ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'}`}
-            >
-              <FolderKanban className="w-4 h-4" />
-              {isCreatingDossier ? 'Création...' : "Créer Dossier d'encaissement"}
-            </button>
-          )}
-        </div>
+            <div className="flex gap-4 overflow-x-auto pb-4 hide-scrollbar snap-x">
+              {mergedDossiers.map(dossier => {
+                const encs = allEncaissements.filter(e => dossier.encaissementIds.includes(e.id));
+                const encsSum = encs.reduce((sum, e) => sum + (e.montantTotal || 0), 0);
+                const totalMontant = dossier.total > 0 ? dossier.total : encsSum;
 
-        {allEncaissements.length === 0 ? (
-          <div className="text-center py-10 bg-slate-50/50 rounded-3xl border border-slate-100">
-            <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-            <p className="text-slate-500 font-bold">Aucun encaissement programmé.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            { (() => {
-               const pastEncaissements = allEncaissements.filter(e => {
-                  if (e.status !== 'DONE' && e.status !== 'ABANDONED') return false;
-                  if (e.isCombined) {
-                      const dossierId = e.combinedWithDossierId || (e as any).dossierId;
-                      const dossier = dossiersPaiement?.find(d => d.id === dossierId);
-                      if (dossier && dossier.status !== 'CLOSED') return false;
-                  }
-                  return true;
-               });
-               const activeIndependent = allEncaissements.filter(e => !pastEncaissements.includes(e) && !e.isCombined);
-               const activeCombinedEncaissements = allEncaissements.filter(e => !pastEncaissements.includes(e) && e.isCombined);
-               
-               const clientDossiersMap = new Map();
-               activeCombinedEncaissements.forEach(e => {
-                  const dossierId = e.combinedWithDossierId || e.dossierId;
-                  if (!dossierId) return;
-                  if (!clientDossiersMap.has(dossierId)) clientDossiersMap.set(dossierId, []);
-                  clientDossiersMap.get(dossierId).push(e);
-               });
-
-               const activeItems = [];
-               activeIndependent.forEach(e => activeItems.push({ type: 'ENCAISSEMENT', data: e, date: e.targetDate }));
-               clientDossiersMap.forEach((encs, dossierId) => {
-                  const dossier = dossiersPaiement?.find(d => d.id === dossierId);
-                  if (dossier) activeItems.push({ type: 'DOSSIER', data: dossier, encaissements: encs, date: encs[0]?.targetDate });
-               });
-
-               activeItems.sort((a, b) => {
-                   const timeA = a.date ? new Date(a.date).getTime() : 0;
-                   const timeB = b.date ? new Date(b.date).getTime() : 0;
-                   if (timeA !== timeB) return timeA - timeB;
-                   const modeA = a.type === 'DOSSIER' ? a.encaissements[0]?.mode : a.data.mode;
-                   const modeB = b.type === 'DOSSIER' ? b.encaissements[0]?.mode : b.data.mode;
-                   if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
-                   if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
-                   return 0;
-               });
-
-               return activeItems.map((item, idx) => {
-                 if (item.type === 'DOSSIER') {
-                   const dossier = item.data;
-                   const encs = item.encaissements;
-                   
-                   encs.sort((a, b) => {
-                       const modeA = a.mode;
-                       const modeB = b.mode;
-                       if (modeA === 'Acquisition' && modeB !== 'Acquisition') return -1;
-                       if (modeB === 'Acquisition' && modeA !== 'Acquisition') return 1;
-                       return 0;
-                   });
-                   
-                   const isSelected = manualFusionSelection.some(e => e.isCombined && e.combinedWithDossierId === dossier.id);
-                   return (
-                     <div key={dossier.id} className={cn(
-                       "p-5 border rounded-2xl shadow-sm hover:shadow-md transition-shadow",
-                       isSelected ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : "bg-white border-slate-200"
-                     )}>
-                        <div className="flex justify-between items-center mb-4">
-                          <div className="flex items-center gap-3">
-                            <input 
-                              type="checkbox" 
-                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                if (e.target.checked) setManualFusionSelection([...manualFusionSelection, encs[0]]);
-                                else setManualFusionSelection(manualFusionSelection.filter(item => item.combinedWithDossierId !== dossier.id));
+                const isSelected = manualFusionSelection.some(e => e.isCombined && e.combinedWithDossierId === dossier.id);
+                
+                return (
+                  <div key={dossier.id} className={cn(
+                    "shrink-0 flex flex-col justify-between p-6 rounded-[28px] w-[350px] min-h-[190px] text-left transition-all duration-500 border overflow-hidden relative group",
+                    isSelected ? "shadow-xl ring-2 ring-offset-2 ring-slate-100 scale-[1.02] bg-violet-50 backdrop-blur-xl border-violet-200/60" : "bg-violet-50 backdrop-blur-xl border-violet-200/60 shadow-violet-500/10 hover:shadow-md hover:-translate-y-1 hover:scale-[1.02]"
+                  )}>
+                    <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-blue-100"></div>
+                    <div className="absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-indigo-100"></div>
+                    <div className="relative z-10 flex flex-col h-full w-full">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-start gap-3">
+                          {dossier.status !== 'CLOSED' && dossier.status !== 'DONE' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isSelected) setManualFusionSelection(manualFusionSelection.filter(item => item.combinedWithDossierId !== dossier.id));
+                                else setManualFusionSelection([...manualFusionSelection, encs[0]]);
                               }}
-                            />
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-purple-100 text-purple-700 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                                <FolderKanban className="w-3.5 h-3.5" /> Dossier Fusionné
-                              </span>
-                              {Array.from(new Set(encs.map(e => e.projectName))).map((pName, idx) => (
-                                <span key={idx} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 shadow-sm">
-                                  {pName}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-500 font-bold">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</span>
-                            <button 
-                              onClick={() => {
-                                if (confirm("Voulez-vous vraiment supprimer ce dossier de paiement ? Les encaissements redeviendront indépendants.")) {
-                                  dissociateDossier(dossier.id);
-                                }
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Défusionner"
+                              className={cn(
+                                "mt-1 w-4 h-4 rounded-full border-2 transition-all hover:scale-110 shadow-sm flex items-center justify-center shrink-0",
+                                isSelected
+                                  ? "bg-blue-500 border-blue-500 text-white" 
+                                  : "bg-white/80 border-slate-300 text-transparent hover:border-blue-400"
+                              )}
+                              title="Sélectionner pour fusion"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              {isSelected && (
+                                <svg viewBox="0 0 14 14" fill="none" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3 7.5L5.5 10L11 4" />
+                                </svg>
+                              )}
                             </button>
+                          )}
+                          <div>
+                            <h4 className="font-extrabold text-[22px] tracking-tight leading-none mb-1.5 transition-colors text-violet-900">Dossier Fusionné</h4>
+                            <p className="text-[10px] uppercase font-bold text-slate-500 mt-1">Créé le {new Date(dossier.createdAt).toLocaleDateString('fr-FR')}</p>
                           </div>
                         </div>
-                        
-                        <div className="space-y-3 mb-5">
-                          {encs.map((eenc, i) => (
-                            <div key={i} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl">
-                              <div>
-                                <div className="text-sm font-bold text-slate-800">{eenc.mode} {eenc.year ? `(Année ${eenc.year})` : ''} <span className="text-slate-400 font-medium ml-1">— {eenc.projectName}</span></div>
-                                <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 mt-0.5">
-                                  <span className="uppercase">{eenc.product}</span>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-[10px] text-slate-400 font-medium">Début</div>
-                                <div className="text-sm font-bold text-slate-900">{new Date(eenc.targetDate).toLocaleDateString('fr-FR')}</div>
-                              </div>
+                        <span className={cn(
+                          "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest shrink-0 shadow-sm",
+                          dossier.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                        )}>
+                          {dossier.status === 'DONE' ? 'Payé' : 'En cours'}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-2 mb-5">
+                        {encs.map(e => {
+                          return (
+                            <div key={e.id} className="flex items-center gap-2 text-[11px] font-bold text-slate-700 bg-white/60 p-2.5 rounded-xl border border-white/40 shadow-sm">
+                              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+                              <span className="truncate" title={`${e.product} - ${e.mode} ${e.year ? `(Année ${e.year})` : e.title ? `(${e.title})` : ''} - ${e.encaissementType === 'AVANCE' ? 'Avance' : 'Solde'}`}>
+                                {e.product} - {e.mode} {e.year ? `(Année ${e.year})` : e.title ? `(${e.title})` : ''} - {e.encaissementType === 'AVANCE' ? 'Avance' : 'Solde'}
+                              </span>
                             </div>
-                          ))}
+                          );
+                        })}
+                      </div>
+                      
+                      <div className="flex justify-between items-end mt-auto pt-4 border-t border-violet-200/50 w-full">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase font-bold text-slate-500">Montant total</span>
+                          <span className="text-sm font-extrabold text-violet-900">
+                            {totalMontant > 0 ? `${totalMontant.toLocaleString()} DA` : '-'}
+                          </span>
                         </div>
-
-                        <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
-                          <button 
-                            onClick={() => setSelectedDossierFacturationId(dossier.id)}
-                            className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2 whitespace-nowrap"
-                          >
-                            <Banknote className="w-4 h-4" /> Gérer l'encaissement
-                          </button>
-                        </div>
-                     </div>
-                   );
-                 } else {
-                   const enc = item.data;
-                   const isUpcoming = enc.status === 'UPCOMING';
-                   const isDone = enc.status === 'DONE';
-                   const isProgress = enc.status === 'IN_PROGRESS' || enc.status === 'PARTIAL';
-                   const isPartial = enc.status === 'PARTIAL';
-
-                   return (
-                     <div key={enc.id} className={cn(
-                       "p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 shadow-sm",
-                       isUpcoming ? "bg-slate-50 border-slate-200/60 opacity-80" :
-                       isDone ? "bg-emerald-50 border-emerald-200/60" :
-                       "bg-white border-blue-200/60 shadow-md shadow-blue-500/5",
-                       manualFusionSelection.some(e => e.id === enc.id) ? "ring-2 ring-indigo-500 border-indigo-500/50 bg-indigo-50/30" : ""
-                     )}>
-                       <div className="flex items-center gap-4">
-                         {!enc.isCombined && enc.status !== 'DONE' && (
-                           <div className="pt-1">
-                             <input 
-                               type="checkbox"
-                               checked={manualFusionSelection.some(e => e.id === enc.id)}
-                               onChange={(e) => {
-                                 if (e.target.checked) {
-                                   setManualFusionSelection([...manualFusionSelection, enc]);
-                                 } else {
-                                   setManualFusionSelection(manualFusionSelection.filter(item => item.id !== enc.id));
-                                 }
-                               }}
-                               className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
-                             />
-                           </div>
-                         )}
-                         <div className={cn(
-                           "w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner",
-                           isUpcoming ? "bg-slate-200 text-slate-500" :
-                           isDone ? "bg-emerald-100 text-emerald-600" :
-                           "bg-blue-100 text-blue-600"
-                         )}>
-                           <Calendar className="w-5 h-5" />
-                         </div>
-                         <div>
-                           <h4 className={cn(
-                             "font-extrabold text-base mb-1",
-                             isUpcoming ? "text-slate-600" : isDone ? "text-emerald-900" : "text-blue-950"
-                           )}>
-                             {enc.mode} {enc.year ? `(Année ${enc.year})` : ''} <span className="text-slate-400 font-medium ml-1">— {enc.projectName}</span>
-                           </h4>
-                           <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                             <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md uppercase tracking-wider">{enc.product}</span>
-                             <span>•</span>
-                             <span className={cn(
-                               isDone ? "text-emerald-600" : isProgress ? "text-blue-600" : ""
-                             )}>
-                               Début : {new Date(enc.targetDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                             </span>
-                           </div>
-                         </div>
-                       </div>
-
-                       <div className="flex items-center gap-4 w-full md:w-auto">
-                         {enc.isCombined && (
-                           <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-purple-200 flex items-center gap-1.5 shadow-sm">
-                             <FolderKanban className="w-3.5 h-3.5" /> Dossier fusionné
-                           </span>
-                         )}
-
-                         {(isDone || isPartial) && enc.montantTotal && (
-                           <div className="text-right">
-                             <div className="text-xs font-extrabold text-slate-800">
-                               {enc.montantEncaisse?.toLocaleString('fr-DZ')} DA / {enc.montantTotal.toLocaleString('fr-DZ')} DA
-                             </div>
-                             {isPartial && enc.resteDette && (
-                               <div className="text-[10px] font-bold text-red-500 mt-0.5">Dette reportée: {enc.resteDette.toLocaleString('fr-DZ')} DA</div>
-                             )}
-                           </div>
-                         )}
-
-                         {isProgress && (
-                           <Link 
-                             to={`/projects/${enc.projectId}`}
-                             className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all hover:-translate-y-0.5 flex items-center gap-2"
-                           >
-                             <Banknote className="w-4 h-4" /> Gérer dans le projet
-                           </Link>
-                         )}
-                         {isDone && (
-                           <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-2">
-                             <CheckCircle2 className="w-4 h-4" /> Clôturé
-                           </span>
-                         )}
-                         {isUpcoming && (
-                           <span className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-2">
-                             <Clock className="w-4 h-4" /> En attente
-                           </span>
-                         )}
-                       </div>
-                     </div>
-                   );
-                 }
-               });
-            })()}
+                        <button
+                          onClick={() => setSelectedDossierFacturationId(dossier.id)}
+                          className="px-4 py-2 bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white rounded-xl text-xs font-bold shadow-md transition-transform hover:-translate-y-0.5"
+                        >
+                          Gérer le dossier
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {showNewProject && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -749,27 +822,12 @@ export default function ClientDetails() {
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Département</label>
                   <select
-                    required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                    disabled
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none cursor-not-allowed font-semibold text-slate-500"
                     value={newProjectData.departement}
-                    onChange={e => setNewProjectData({ ...newProjectData, departement: e.target.value })}
                   >
                     <option value="D1">D1</option>
                     <option value="D2">D2</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Processus d'intégration</label>
-                  <select
-                    required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
-                    value={newProjectData.processType}
-                    onChange={e => setNewProjectData({ ...newProjectData, processType: e.target.value as any })}
-                  >
-                    <option value="STANDARD">Standard (Acquisition ➔ M. Gratuite ➔ Maintenance)</option>
-                    <option value="DIRECT_MAINTENANCE">Sans gratuité (Acquisition ➔ Maintenance)</option>
-                    <option value="MAINTENANCE_ONLY">Full Maintenance (Maintenance uniquement)</option>
                   </select>
                 </div>
 
@@ -779,15 +837,26 @@ export default function ClientDetails() {
                     required
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
                     value={newProjectData.product}
-                    onChange={e => setNewProjectData({ ...newProjectData, product: e.target.value as ProductType })}
+                    onChange={e => {
+                      const prodName = e.target.value;
+                      const prodConfig = products.find(p => p.name === prodName);
+                      if (prodConfig) {
+                        setNewProjectData({
+                          ...newProjectData,
+                          product: prodName as any,
+                          departement: prodConfig.departement,
+                          entity: prodConfig.defaultEntity,
+                          maintenancePeriodicity: prodConfig.maintenancePeriodicity
+                        });
+                      } else {
+                        setNewProjectData({ ...newProjectData, product: prodName as any });
+                      }
+                    }}
                   >
-                    <option value="PAYE">Paye (PAYE)</option>
-                    <option value="BUDGET">Budget (BUDGET)</option>
-                    <option value="BUDGET_APC">Budget APC (BUDGET_APC)</option>
-                    <option value="STOCKS">Stocks (STOCKS)</option>
-                    <option value="GRH">GRH</option>
-                    <option value="PHARMATIS">Pharmatis</option>
-                    <option value="GBS">GBS</option>
+                    {products.length === 0 && <option value="PAYE">Aucun produit dynamique trouvé (par défaut PAYE)</option>}
+                    {products.map(p => (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    ))}
                   </select>
                 </div>
                 
@@ -835,8 +904,8 @@ export default function ClientDetails() {
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Entité responsable</label>
                   <select
-                    required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                    disabled
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none cursor-not-allowed font-semibold text-slate-500"
                     value={newProjectData.entity}
                     onChange={e => setNewProjectData({ ...newProjectData, entity: e.target.value as any })}
                   >
@@ -858,6 +927,21 @@ export default function ClientDetails() {
                     <option value="Effectué">Effectué</option>
                     <option value="Suspendu">Suspendu</option>
                     <option value="Abandonné">Abandonné</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Processus d'intégration (Maintenance)</label>
+                  <select
+                    disabled
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none cursor-not-allowed font-semibold text-slate-500"
+                    value={newProjectData.maintenancePeriodicity || 'Annuelle'}
+                    onChange={e => setNewProjectData({ ...newProjectData, maintenancePeriodicity: e.target.value as any })}
+                  >
+                    <option value="Annuelle">Annuelle</option>
+                    <option value="Semestrielle">Semestrielle</option>
+                    <option value="Trimestrielle">Trimestrielle</option>
+                    <option value="Mensuelle">Mensuelle</option>
                   </select>
                 </div>
 

@@ -80,60 +80,58 @@ export default function ClientsList() {
               const avatarStyle = getAvatarStyle(client.name);
               
               return (
-                <div 
-                  key={client.id} 
-                  className="relative bg-white/60 backdrop-blur-md border border-white/60 rounded-[24px] shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:shadow-blue-500/10 hover:-translate-y-1 hover:border-blue-200/80 transition-all duration-300 flex flex-col justify-between group overflow-hidden"
+                <Link
+                  key={client.id}
+                  to={`/clients/${client.id}`}
+                  className="cursor-pointer shrink-0 flex flex-col justify-between p-6 rounded-[28px] min-h-[190px] text-left transition-all duration-500 border overflow-hidden relative group hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 text-white shadow-blue-500/10 hover:shadow-blue-500/30 border-white/10"
                 >
-                  {/* Halo coloré en arrière-plan */}
-                  <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full blur-3xl z-0 pointer-events-none opacity-20 group-hover:opacity-40 transition-opacity duration-500 bg-blue-500" />
-                  
-                  <Link to={`/clients/${client.id}`} className="p-5 block flex-1 space-y-4 relative z-10">
-                    <div className="flex justify-between items-start gap-4">
-                      <h4 className="font-extrabold text-lg text-slate-900 group-hover:text-blue-600 transition-colors leading-tight tracking-tight line-clamp-2">
-                        {client.name}
-                      </h4>
-                      <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 shrink-0 transition-all mt-0.5" />
-                    </div>
+                  <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-white/20"></div>
+                  <div className="absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-black/10"></div>
+                  <div className="relative z-10 flex flex-col h-full pt-1 w-full">
+                    <h4 className="font-extrabold text-[22px] tracking-tight leading-none mb-1.5 drop-shadow-md text-white line-clamp-2 pr-16">
+                      {client.name}
+                    </h4>
                     
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Wilaya {client.wilaya}</span>
-                      </div>
+                    <div className="flex flex-col gap-2.5 w-full mt-auto pt-4">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/80">
+                        {client.wilaya ? `Wilaya: ${client.wilaya}` : 'Wilaya non définie'}
+                      </span>
                       
-                      <div className="flex items-center gap-2 text-xs text-slate-600 font-bold">
-                        <Users className="w-4 h-4 text-slate-400" />
-                        <span>{client.effectif} {client.effectifType === 'SALARIES' ? 'Salariés' : 'Étudiants'}</span>
+                      <div className="flex justify-between items-end">
+                        <div className="flex gap-1.5 relative w-[60%] text-xs font-bold text-white/90">
+                          {client.effectif} {client.effectifType === 'UNIVERSITE' ? 'Université' : 'EH/DA'}
+                        </div>
+                        <div className="font-black text-xs text-white/90 bg-black/10 px-2 py-1 rounded-lg backdrop-blur-md">
+                          {clientProjects.length} PROJETS
+                        </div>
                       </div>
                     </div>
-                  </Link>
+                  </div>
 
-                  {/* Card actions footer */}
-                  <div className="px-5 py-3 border-t border-slate-200/40 bg-white/40 flex justify-between items-center mt-auto relative z-10 backdrop-blur-sm">
-                    <span className="inline-flex items-center px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest bg-blue-50/80 text-blue-700 border border-blue-100 shadow-sm">
-                      {clientProjects.length} projet{clientProjects.length > 1 ? 's' : ''}
-                    </span>
-                    <div className="flex gap-2">
-                      <Link 
-                        to={`/clients/${client.id}/edit`}
-                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-white rounded-xl shadow-sm transition-all border border-transparent hover:border-slate-200/50"
+                  {/* Actions that only appear on hover */}
+                  <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          window.location.href = `/clients/${client.id}/edit`;
+                        }}
+                        className="p-1.5 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 rounded-xl backdrop-blur-sm transition-all"
                         title="Modifier"
                       >
-                        <Edit className="w-4 h-4" />
-                      </Link>
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.preventDefault();
                           handleDelete(client.id);
                         }}
-                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-xl shadow-sm transition-all border border-transparent hover:border-red-100"
+                        className="p-1.5 text-red-300 hover:text-white bg-black/20 hover:bg-red-500/80 rounded-xl backdrop-blur-sm transition-all"
                         title="Supprimer"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    </div>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>

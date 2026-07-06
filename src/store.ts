@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import { Client, Project, MaintenanceInfo, Mission, Phase, ProjectTask, DossierPaiement, EncaissementRecord } from './types';
+import { Client, Project, MaintenanceInfo, Mission, Phase, ProjectTask, DossierPaiement, EncaissementRecord, ProductConfig } from './types';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
@@ -20,17 +20,6 @@ export const getDefaultPhases = (mode: string, annexeName?: string): Phase[] => 
       add('Récupération Serveur');
       add('Installation serveur');
       add('Formation');
-    } else if (phase === 'Encaissement') {
-      add('Proforma à rédiger, à faire valider par la DFC et à transmettre au client');
-      add('Dossier Soumission(s) à préparer. Soumission(s) complétées à scanner');
-      add('Coordonnées du client à compléter (Adresse exacte, Numéro agrément, AI, NIF, NIS)');
-      add('Convention à compléter, scanner et à transmettre au client.');
-      add('Récupérer ensuite un exemplaire de convention signé par les deux parties.');
-      add('Bon de commande / ODS signé à récupérer');
-      add('Facture définitive à créer et déposer au client');
-      add('Récupérer Service fait de chez le client');
-    } else if (phase === 'Recouvrement') {
-      add('Relance Client');
     }
     return tasks;
   };
@@ -39,16 +28,11 @@ export const getDefaultPhases = (mode: string, annexeName?: string): Phase[] => 
     return [
       { id: uuidv4(), name: 'Démarchage', status: 'ACTIVE', tasks: getTasks('Démarchage') },
       { id: uuidv4(), name: 'Adaptation', status: 'PENDING', tasks: getTasks('Adaptation') },
-      { id: uuidv4(), name: 'Encaissement', status: 'PENDING', tasks: getTasks('Encaissement') },
-      { id: uuidv4(), name: 'Recouvrement', status: 'PENDING', tasks: getTasks('Recouvrement') },
     ];
   } else if (mode === 'Maintenance offerte') {
-    return []; // Aucune tâche pour la maintenance offerte
+    return [{ id: uuidv4(), name: 'Maintenance', status: 'ACTIVE', tasks: [] }];
   } else if (mode === 'Maintenance') {
-    return [
-      { id: uuidv4(), name: 'Encaissement', status: 'ACTIVE', tasks: getTasks('Encaissement') },
-      { id: uuidv4(), name: 'Recouvrement', status: 'PENDING', tasks: getTasks('Recouvrement') },
-    ];
+    return [{ id: uuidv4(), name: 'Maintenance', status: 'ACTIVE', tasks: [] }];
   } else if (mode === 'Annexe') {
     return [
       { 
@@ -56,9 +40,7 @@ export const getDefaultPhases = (mode: string, annexeName?: string): Phase[] => 
         name: 'Adaptation', 
         status: 'ACTIVE', 
         tasks: [{ id: uuidv4(), name: annexeName || 'Prestation', date: '', status: 'PENDING' }] 
-      },
-      { id: uuidv4(), name: 'Encaissement', status: 'PENDING', tasks: getTasks('Encaissement') },
-      { id: uuidv4(), name: 'Recouvrement', status: 'PENDING', tasks: getTasks('Recouvrement') },
+      }
     ];
   }
   return [];
@@ -68,9 +50,14 @@ interface AppState {
   clients: Client[];
   projects: Project[];
   missions: Mission[];
+  products: ProductConfig[];
   setClients: (clients: Client[]) => void;
   setProjects: (projects: Project[]) => void;
   setMissions: (missions: Mission[]) => void;
+  setProducts: (products: ProductConfig[]) => void;
+  addProduct: (product: Omit<ProductConfig, 'id'>) => void;
+  updateProduct: (id: string, data: Partial<ProductConfig>) => void;
+  deleteProduct: (id: string) => void;
   addClient: (client: Omit<Client, 'id'>) => void;
   updateClient: (id: string, data: Partial<Client>) => void;
   deleteClient: (id: string) => void;
@@ -78,8 +65,8 @@ interface AppState {
   updateProject: (id: string, data: Partial<Project>) => void;
   deleteProject: (id: string) => void;
   addContract: (projectId: string, contract: { name: string; type: string }) => void;
-  addAnnexeContract: (projectId: string, annexeName: string, attachedToContractId?: string, annexePrice?: number) => void;
-  deleteAnnexeContract: (projectId: string, contractId: string) => void;
+  addCustomContract: (projectId: string, name: string, price?: number) => void;
+  deleteCustomContract: (projectId: string, contractId: string) => void;
   updateContractStatus: (projectId: string, contractId: string, status: 'ACTIVE' | 'CLOSED') => void;
   togglePhaseStatus: (projectId: string, contractId: string, phaseId: string) => void;
   addTaskToContract: (projectId: string, contractId: string, phaseId: string, task: Omit<ProjectTask, 'id'>) => void;
@@ -102,12 +89,13 @@ interface AppState {
   addDossierPaiement: (dossier: Omit<DossierPaiement, 'id' | 'createdAt'>) => Promise<string>;
   updateDossierPaiement: (id: string, data: Partial<DossierPaiement>) => void;
   deleteDossierPaiement: (id: string) => void;
-  dissociateDossier: (dossierId: string) => void;
+  dissociateDossier: (dossierId: string, restoreProformas?: boolean) => void;
   removeEncaissementFromDossier: (projectId: string, encaissementId: string) => void;
   updateEncaissement: (projectId: string, encaissementId: string, data: Partial<EncaissementRecord>) => void;
   addDocumentHistoryEvent: (projectId: string, encaissementId: string, event: Omit<DocumentHistoryEvent, 'id'>) => void;
   activateMaintenanceEncaissement: (projectId: string, encaissementId: string, mergeConfig?: { dossierId?: string; otherEncaissementId?: string; otherProjectId?: string; clientId?: string }) => Promise<void>;
   deactivateMaintenanceEncaissement: (projectId: string, encaissementId: string) => Promise<void>;
+  getNextDocumentNumber: (type: 'PROFORMA' | 'FACTURE') => string;
 }
 
 export const useStore = create<AppState>()(
@@ -117,10 +105,57 @@ export const useStore = create<AppState>()(
       projects: [],
       missions: [],
       dossiersPaiement: [],
+      products: [],
       setClients: (clients) => set({ clients }),
       setProjects: (projects) => set({ projects }),
       setMissions: (missions) => set({ missions }),
       setDossiersPaiement: (dossiersPaiement) => set({ dossiersPaiement }),
+      setProducts: (products) => set({ products }),
+      addProduct: async (productData) => {
+        const id = uuidv4();
+        const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+        const ownerId = auth.currentUser?.uid;
+
+        const newProduct = { ...productData, id, ownerId };
+
+        if (ownerId) {
+          try {
+            await setDoc(doc(db, 'products', id), newProduct);
+            return;
+          } catch (e) {
+            handleFirestoreError(e, OperationType.CREATE, 'products');
+          }
+        }
+
+        set((state) => ({
+          products: [...state.products, newProduct]
+        }));
+      },
+      updateProduct: async (id, data) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+        try {
+          await setDoc(doc(db, 'products', id), data, { merge: true });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, `products/${id}`);
+        }
+        set((state) => ({
+          products: state.products.map((p) => (p.id === id ? { ...p, ...data } : p)),
+        }));
+      },
+      deleteProduct: async (id) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        try {
+          await deleteDoc(doc(db, 'products', id));
+        } catch (e) {
+          handleFirestoreError(e, OperationType.DELETE, `products/${id}`);
+        }
+        set((state) => ({
+          products: state.products.filter((p) => p.id !== id),
+        }));
+      },
       addClient: async (clientData) => {
         const id = uuidv4();
         const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
@@ -211,7 +246,7 @@ export const useStore = create<AppState>()(
 
         const contractMaintenance = {
           id: uuidv4(),
-          name: "Maintenance Annuelle",
+          name: "Maintenance 1",
           type: "Maintenance",
           mode: "Maintenance" as const,
           status: "PENDING" as const,
@@ -298,6 +333,10 @@ export const useStore = create<AppState>()(
         } catch (e) {
           handleFirestoreError(e, OperationType.UPDATE, `projects/${id}`);
         }
+
+        if (data.encaissements) {
+          get().evaluateAutomations(id);
+        }
       },
       addContract: (projectId, contractData) => {
         const state = get();
@@ -323,51 +362,36 @@ export const useStore = create<AppState>()(
 
         state.updateProject(projectId, { contracts, history: newHistory });
       },
-      addAnnexeContract: (projectId, annexeName, attachedToContractId, annexePrice) => {
+      addCustomContract: (projectId, name, price) => {
         const state = get();
         const project = state.projects.find(p => p.id === projectId);
         if (!project) return;
 
         const newContract = {
           id: uuidv4(),
-          name: annexeName,
-          type: 'Annexe',
-          attachedToContractId,
+          name,
+          type: 'Standard',
           mode: 'Annexe' as any,
           status: 'ACTIVE' as const,
           startDate: new Date().toISOString().split('T')[0],
-          phases: getDefaultPhases('Annexe', annexeName),
+          phases: getDefaultPhases('Annexe', name),
           tasks: [],
           documents: {}
         };
         const contracts = [...(project.contracts || []), newContract];
-
-        const newEncaissement: EncaissementRecord = {
-          id: uuidv4(),
-          projectId,
-          mode: 'Annexe',
-          annexeName,
-          annexePrice,
-          targetDate: new Date().toISOString().split('T')[0],
-          status: 'IN_PROGRESS',
-          proforma: { status: 'PENDING' },
-          bc: { status: 'PENDING' },
-          facture: { status: 'PENDING' }
-        };
-        const encaissements = [...(project.encaissements || []), newEncaissement];
 
         const newHistory = [
           ...(project.history || []),
           {
             id: uuidv4(),
             date: new Date().toLocaleDateString('fr-FR'),
-            message: `Prestation annexe ajoutée : ${annexeName}`
+            message: `Contrat (indépendant) créé : ${name} ${price ? `(Prix: ${price})` : ''}`
           }
         ];
 
-        state.updateProject(projectId, { contracts, encaissements, history: newHistory });
+        state.updateProject(projectId, { contracts, history: newHistory });
       },
-      deleteAnnexeContract: (projectId, contractId) => {
+      deleteCustomContract: (projectId, contractId) => {
         const state = get();
         const project = state.projects.find(p => p.id === projectId);
         if (!project || !project.contracts) return;
@@ -432,8 +456,21 @@ export const useStore = create<AppState>()(
           let message = `Phase "${phases[phaseIndex].name}" terminée.`;
 
           if (phaseIndex === phases.length - 1) {
-            contract.status = 'DONE';
-            message += ` Contrat "${contract.name}" clôturé.`;
+            let canClose = true;
+            if (contract.mode === 'Acquisition' || contract.mode === 'Maintenance') {
+               const unpaid = (project.encaissements || []).some(e => e.contractId === contract.id && e.status !== 'DONE' && e.status !== 'CANCELED');
+               const hasEncaissement = (project.encaissements || []).some(e => e.contractId === contract.id && e.encaissementType === 'TOTAL');
+               
+               if (unpaid || !hasEncaissement) {
+                 canClose = false;
+                 message += ` La phase est terminée, mais le contrat "${contract.name}" reste actif en attente du règlement total.`;
+               }
+            }
+
+            if (canClose) {
+              contract.status = 'DONE';
+              message += ` Contrat "${contract.name}" clôturé.`;
+            }
           } else {
             phases[phaseIndex + 1] = { 
               ...phases[phaseIndex + 1], 
@@ -606,8 +643,8 @@ export const useStore = create<AppState>()(
           }
         }
 
-        // Programmer Maintenance Annuelle
-        const maintAnnuelle = updatedContracts.find(c => c.mode === 'Maintenance');
+        // Programmer Maintenance Annuelle (Maintenance 1)
+        const maintAnnuelle = updatedContracts.find(c => c.mode === 'Maintenance' && (c.name === 'Maintenance 1' || c.name === 'Maintenance Annuelle' || c.name === 'Maintenance'));
         if (maintAnnuelle && maintAnnuelle.status === 'PENDING') {
           let maintDate: Date | null = null;
           
@@ -638,29 +675,32 @@ export const useStore = create<AppState>()(
         // --- NOUVELLE LOGIQUE : GÉNÉRATION DES ENCAISSEMENTS ---
         let currentEncaissements = [...(project.encaissements || [])];
         
-        // 1. Gérer l'encaissement d'Acquisition (S'active si on atteint la phase Encaissement ou Recouvrement)
-        const isAcqEncaissementPhaseActive = acqContract?.phases?.some(p => 
-          (p.name === 'Encaissement' || p.name === 'Recouvrement') && (p.status === 'ACTIVE' || p.status === 'DONE')
-        );
-
-        if (isAcqEncaissementPhaseActive) {
-           let acqEnc = currentEncaissements.find(e => e.mode === 'Acquisition');
-           if (!acqEnc) {
-             acqEnc = {
-                id: uuidv4(),
-                projectId,
-                mode: 'Acquisition',
-                targetDate: new Date().toISOString().split('T')[0],
-                status: 'IN_PROGRESS',
-                proforma: { status: 'PENDING' },
-                bc: { status: 'PENDING' },
-                facture: { status: 'PENDING' }
-             };
-             currentEncaissements.push(acqEnc);
-             hasChanges = true;
-           } else if (acqEnc.status === 'UPCOMING') {
-             acqEnc.status = 'IN_PROGRESS';
-             hasChanges = true;
+        // 1. Gérer l'encaissement d'Acquisition (S'active à la clôture de la phase Adaptation)
+        const acqContractForEnc = updatedContracts.find(c => c.mode === 'Acquisition');
+        if (acqContractForEnc) {
+           const adaptationPhase = acqContractForEnc.phases.find(p => p.name === 'Adaptation');
+           if (adaptationPhase && adaptationPhase.status === 'DONE') {
+             const existingTotal = currentEncaissements.find(e => e.contractId === acqContractForEnc.id && e.encaissementType === 'TOTAL');
+             if (!existingTotal) {
+               currentEncaissements.push({
+                 id: uuidv4(),
+                 projectId,
+                 contractId: acqContractForEnc.id,
+                 mode: 'Acquisition',
+                 encaissementType: 'TOTAL',
+                 billingMode: 'FACTURE',
+                 targetDate: new Date().toISOString().split('T')[0],
+                 status: 'IN_PROGRESS',
+                 proforma: { status: 'PENDING' },
+                 soumission: { status: 'PENDING' },
+                 convention: { status: 'PENDING' },
+                 bc: { status: 'PENDING' },
+                 serviceFait: { status: 'PENDING' },
+                 abe: { status: 'PENDING' },
+                 facture: { status: 'PENDING' }
+               });
+               hasChanges = true;
+             }
            }
         }
 
@@ -674,16 +714,26 @@ export const useStore = create<AppState>()(
           }
 
           // Vérifier si Maintenance 1 Encaissement existe (Year 1)
+          const maintAnnuelleContract = updatedContracts.find(c => c.mode === 'Maintenance' && (c.name === 'Maintenance Annuelle' || c.name === 'Maintenance 1' || c.name === 'Maintenance'));
+          const maintAnnuelleContractId = maintAnnuelleContract ? maintAnnuelleContract.id : undefined;
+
           if (!currentEncaissements.find(e => e.mode === 'Maintenance' && e.year === 1)) {
             currentEncaissements.push({
               id: uuidv4(),
               projectId,
+              contractId: maintAnnuelleContractId,
               mode: 'Maintenance',
+              encaissementType: 'TOTAL',
+              billingMode: 'FACTURE',
               year: 1,
               targetDate: maintTargetDate.toISOString().split('T')[0],
               status: maintTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
               proforma: { status: 'PENDING' },
+              soumission: { status: 'PENDING' },
+              convention: { status: 'PENDING' },
               bc: { status: 'PENDING' },
+              serviceFait: { status: 'PENDING' },
+              abe: { status: 'PENDING' },
               facture: { status: 'PENDING' }
             });
             hasChanges = true;
@@ -697,6 +747,27 @@ export const useStore = create<AppState>()(
             return { ...enc, status: 'IN_PROGRESS' };
           }
           return enc;
+        });
+
+        // --- Vérification de la clôture des contrats en attente de règlement ---
+        updatedContracts = updatedContracts.map(contract => {
+          // Patch missing phases for maintenance contracts
+          if ((contract.mode === 'Maintenance' || contract.mode === 'Maintenance offerte') && (!contract.phases || contract.phases.length === 0)) {
+            hasChanges = true;
+            contract.phases = [{ id: uuidv4(), name: 'Maintenance', status: 'ACTIVE', tasks: [] }];
+          }
+
+          if (contract.status === 'ACTIVE' && (contract.mode === 'Acquisition' || contract.mode === 'Maintenance')) {
+            const allPhasesDone = contract.phases && contract.phases.length > 0 && contract.phases.every((p: any) => p.status === 'DONE');
+            if (allPhasesDone) {
+              const unpaid = currentEncaissements.some(e => e.contractId === contract.id && e.status !== 'DONE' && e.status !== 'CANCELED');
+              if (!unpaid) {
+                hasChanges = true;
+                return { ...contract, status: 'DONE' };
+              }
+            }
+          }
+          return contract;
         });
 
         if (hasChanges) {
@@ -790,27 +861,6 @@ export const useStore = create<AppState>()(
         const project = state.projects.find(p => p.id === projectId);
         if (!project || !project.encaissements) return;
 
-        const targetEnc = project.encaissements.find(e => e.id === encaissementId);
-        const dossierId = targetEnc?.isCombined ? (targetEnc.combinedWithDossierId || (targetEnc as any).dossierId) : null;
-
-        if (dossierId) {
-          state.projects.forEach(p => {
-             if (!p.encaissements) return;
-             let changed = false;
-             const newEncs = p.encaissements.map(e => {
-                const eDossierId = e.combinedWithDossierId || (e as any).dossierId;
-                if (e.isCombined && eDossierId === dossierId) {
-                  changed = true;
-                  return { ...e, ...data };
-                }
-                return e;
-             });
-             if (changed) {
-               state.updateProject(p.id, { encaissements: newEncs });
-             }
-          });
-          return;
-        }
 
         const updatedEncaissements = project.encaissements.map(e => 
           e.id === encaissementId ? { ...e, ...data } : e
@@ -875,22 +925,54 @@ export const useStore = create<AppState>()(
         // Prevent duplicate generation for the same year
         if (maintenances.some(m => m.year === nextYear)) return;
 
-        const nextTargetDate = new Date(lastMaint.targetDate);
-        nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
+        const existingContract = (project.contracts || []).find(c => c.mode === 'Maintenance' && (c.name === `Maintenance ${lastMaint.year}` || c.name === `Maintenance Année ${lastMaint.year}` || (lastMaint.year === 1 && (c.name === 'Maintenance Annuelle' || c.name === 'Maintenance' || c.name === 'Maintenance 1'))));
+        const baseDateStr = existingContract?.startDate || lastMaint.targetDate;
+
+        const nextTargetDate = new Date(baseDateStr);
+        if (project.maintenancePeriodicity === 'Mensuelle') {
+          nextTargetDate.setMonth(nextTargetDate.getMonth() + 1);
+        } else if (project.maintenancePeriodicity === 'Trimestrielle') {
+          nextTargetDate.setMonth(nextTargetDate.getMonth() + 3);
+        } else if (project.maintenancePeriodicity === 'Semestrielle') {
+          nextTargetDate.setMonth(nextTargetDate.getMonth() + 6);
+        } else {
+          nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
+        }
         
+        const newContractId = uuidv4();
+        const newContract = {
+          id: newContractId,
+          name: `Maintenance ${nextYear}`,
+          type: 'Standard',
+          mode: 'Maintenance',
+          status: 'PENDING' as const,
+          startDate: nextTargetDate.toISOString().split('T')[0],
+          phases: [
+            { id: uuidv4(), name: 'Maintenance', status: 'ACTIVE' as const, tasks: [] }
+          ]
+        };
+
         const newEncaissement: EncaissementRecord = {
           id: uuidv4(),
           projectId,
+          contractId: newContractId,
           mode: 'Maintenance',
           year: nextYear,
           targetDate: nextTargetDate.toISOString().split('T')[0],
           status: nextTargetDate <= new Date() ? 'IN_PROGRESS' : 'UPCOMING',
           proforma: { status: 'PENDING' },
+          soumission: { status: 'PENDING' },
+          convention: { status: 'PENDING' },
           bc: { status: 'PENDING' },
+          serviceFait: { status: 'PENDING' },
+          abe: { status: 'PENDING' },
           facture: { status: 'PENDING' }
         };
         
-        state.updateProject(projectId, { encaissements: [...project.encaissements, newEncaissement] });
+        state.updateProject(projectId, { 
+          contracts: [...(project.contracts || []), newContract],
+          encaissements: [...project.encaissements, newEncaissement] 
+        });
       },
       activateMaintenanceEncaissement: async (projectId, encaissementId, mergeConfig) => {
         const state = get();
@@ -901,28 +983,46 @@ export const useStore = create<AppState>()(
         const targetEnc = project.encaissements.find(e => e.id === encaissementId);
         const currentYear = targetEnc?.year || 1;
 
+        const activationDateStr = new Date().toISOString().split('T')[0];
+
         const updatedEncaissements = project.encaissements.map(e => {
           if (e.id === encaissementId) {
             return {
               ...e,
-              targetDate: new Date().toISOString().split('T')[0],
+              targetDate: activationDateStr,
               status: 'IN_PROGRESS' as const
             };
           }
           return e;
         });
 
-        const nextTargetDate = new Date();
-        nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
+        const nextTargetDate = new Date(activationDateStr);
+        if (project.maintenancePeriodicity === 'Mensuelle') {
+          nextTargetDate.setMonth(nextTargetDate.getMonth() + 1);
+        } else if (project.maintenancePeriodicity === 'Trimestrielle') {
+          nextTargetDate.setMonth(nextTargetDate.getMonth() + 3);
+        } else if (project.maintenancePeriodicity === 'Semestrielle') {
+          nextTargetDate.setMonth(nextTargetDate.getMonth() + 6);
+        } else {
+          nextTargetDate.setFullYear(nextTargetDate.getFullYear() + 1);
+        }
+        
+        const newContractId = uuidv4();
+        
         updatedEncaissements.push({
           id: uuidv4(),
           projectId,
+          contractId: newContractId,
           mode: 'Maintenance',
           year: currentYear + 1,
           targetDate: nextTargetDate.toISOString().split('T')[0],
           status: 'UPCOMING',
           proforma: { status: 'PENDING' },
+          soumission: { status: 'PENDING' },
+          convention: { status: 'PENDING' },
           bc: { status: 'PENDING' },
+          serviceFait: { status: 'PENDING' },
+          abe: { status: 'PENDING' },
           facture: { status: 'PENDING' }
         });
 
@@ -937,38 +1037,37 @@ export const useStore = create<AppState>()(
         });
 
         updatedContracts.push({
-          id: uuidv4(),
-          name: `Maintenance Année ${currentYear + 1}`,
+          id: newContractId,
+          name: `Maintenance ${currentYear + 1}`,
           type: 'Standard',
           mode: 'Maintenance',
           status: 'PENDING' as const,
           startDate: nextTargetDate.toISOString().split('T')[0],
           phases: [
-            { id: uuidv4(), name: 'Encaissement', status: 'PENDING' as const, tasks: [] },
-            { id: uuidv4(), name: 'Recouvrement', status: 'PENDING' as const, tasks: [] }
+            { id: uuidv4(), name: 'Maintenance', status: 'ACTIVE' as const, tasks: [] }
           ]
         });
 
         // Activate the current year contract
-        const currentYearContract = updatedContracts.find(c => c.mode === 'Maintenance' && (c.name === `Maintenance Année ${currentYear}` || (currentYear === 1 && (c.name === 'Maintenance Annuelle' || c.name === 'Maintenance'))));
+        const currentYearContract = updatedContracts.find(c => c.mode === 'Maintenance' && (c.name === `Maintenance ${currentYear}` || c.name === `Maintenance Année ${currentYear}` || (currentYear === 1 && (c.name === 'Maintenance Annuelle' || c.name === 'Maintenance' || c.name === 'Maintenance 1'))));
         if (!currentYearContract) {
            // If it didn't exist yet, we create it active
            updatedContracts.push({
              id: uuidv4(),
-             name: `Maintenance Année ${currentYear}`,
+             name: `Maintenance ${currentYear}`,
              type: 'Standard',
              mode: 'Maintenance',
              status: 'ACTIVE' as const,
-             startDate: new Date().toISOString().split('T')[0],
+             startDate: activationDateStr,
              phases: [
                { id: uuidv4(), name: 'Encaissement', status: 'ACTIVE' as const, tasks: [] },
                { id: uuidv4(), name: 'Recouvrement', status: 'PENDING' as const, tasks: [] }
              ]
            });
         } else {
-           currentYearContract.name = `Maintenance Année ${currentYear}`;
+           currentYearContract.name = `Maintenance ${currentYear}`;
            currentYearContract.status = 'ACTIVE';
-           currentYearContract.startDate = new Date().toISOString().split('T')[0];
+           currentYearContract.startDate = activationDateStr;
            if (currentYearContract.phases && currentYearContract.phases.length > 0) {
              currentYearContract.phases[0].status = 'ACTIVE';
            }
@@ -979,7 +1078,7 @@ export const useStore = create<AppState>()(
           {
             id: uuidv4(),
             date: new Date().toLocaleDateString('fr-FR'),
-            message: `Maintenance Année ${currentYear} activée par anticipation. Maintenance Gratuite sautée.`
+            message: `Maintenance ${currentYear} activée par anticipation. Maintenance Gratuite sautée.`
           }
         ];
 
@@ -998,8 +1097,17 @@ export const useStore = create<AppState>()(
               const newEncaissementIds = [...dossier.encaissementIds, encaissementId];
               await state.updateDossierPaiement(dossier.id, { encaissementIds: newEncaissementIds });
               
-              // update this encaissement to know it's in a dossier
-              state.updateEncaissement(projectId, encaissementId, { isCombined: true, combinedWithDossierId: dossier.id });
+              // update this encaissement to know it's in a dossier and reset billing
+              const resetBilling = {
+                proforma: { status: 'CANCELLED' as const },
+                soumission: { status: 'CANCELLED' as const },
+                convention: { status: 'CANCELLED' as const },
+                bc: { status: 'CANCELLED' as const },
+                serviceFait: { status: 'CANCELLED' as const },
+                abe: { status: 'CANCELLED' as const },
+                facture: { status: 'CANCELLED' as const }
+              };
+              state.updateEncaissement(projectId, encaissementId, { isCombined: true, combinedWithDossierId: dossier.id, ...resetBilling });
             }
           } 
           // If we create a new dossier from an existing independent encaissement
@@ -1011,9 +1119,18 @@ export const useStore = create<AppState>()(
               documents: {}
             });
             
-            // update both encaissements
-            state.updateEncaissement(projectId, encaissementId, { isCombined: true, combinedWithDossierId: newDossierId });
-            state.updateEncaissement(mergeConfig.otherProjectId, mergeConfig.otherEncaissementId, { isCombined: true, combinedWithDossierId: newDossierId });
+            // update both encaissements and reset billing
+            const resetBilling = {
+              proforma: { status: 'CANCELLED' as const },
+              soumission: { status: 'CANCELLED' as const },
+              convention: { status: 'CANCELLED' as const },
+              bc: { status: 'CANCELLED' as const },
+              serviceFait: { status: 'CANCELLED' as const },
+              abe: { status: 'CANCELLED' as const },
+              facture: { status: 'CANCELLED' as const }
+            };
+            state.updateEncaissement(projectId, encaissementId, { isCombined: true, combinedWithDossierId: newDossierId, ...resetBilling });
+            state.updateEncaissement(mergeConfig.otherProjectId, mergeConfig.otherEncaissementId, { isCombined: true, combinedWithDossierId: newDossierId, ...resetBilling });
           }
         }
       },
@@ -1051,17 +1168,17 @@ export const useStore = create<AppState>()(
 
         let updatedContracts = project.contracts || [];
         
-        updatedContracts = updatedContracts.filter(c => !(c.mode === 'Maintenance' && (c.name === `Maintenance Année ${currentYear + 1}` || c.name === `Maintenance Année ${currentYear + 1} `)));
+        updatedContracts = updatedContracts.filter(c => !(c.mode === 'Maintenance' && (c.name === `Maintenance ${currentYear + 1}` || c.name === `Maintenance Année ${currentYear + 1}`)));
 
         updatedContracts = updatedContracts.map(c => {
-          if (c.mode === 'Maintenance' && c.name === `Maintenance Année ${currentYear}`) {
+          if (c.mode === 'Maintenance' && (c.name === `Maintenance ${currentYear}` || c.name === `Maintenance Année ${currentYear}`)) {
             return {
               ...c,
               status: 'PENDING' as const,
               phases: c.phases.map(ph => ({ ...ph, status: 'PENDING' as const }))
             };
           }
-          if (currentYear > 1 && c.mode === 'Maintenance' && c.name === `Maintenance Année ${currentYear - 1}`) {
+          if (currentYear > 1 && c.mode === 'Maintenance' && (c.name === `Maintenance ${currentYear - 1}` || c.name === `Maintenance Année ${currentYear - 1}`)) {
             return {
               ...c,
               status: 'ACTIVE' as const
@@ -1075,7 +1192,7 @@ export const useStore = create<AppState>()(
           {
             id: uuidv4(),
             date: new Date().toLocaleDateString('fr-FR'),
-            message: `Activation de la Maintenance Année ${currentYear} annulée.`
+            message: `Activation de la Maintenance ${currentYear} annulée.`
           }
         ];
 
@@ -1084,6 +1201,50 @@ export const useStore = create<AppState>()(
           contracts: updatedContracts,
           history: newHistory 
         });
+      },
+      getNextDocumentNumber: (type) => {
+        const state = get();
+        const currentYearStr = new Date().getFullYear().toString().slice(-2);
+        let maxSequence = 0;
+
+        state.projects.forEach(p => {
+          (p.encaissements || []).forEach(e => {
+            const steps = [e.proforma, e.facture];
+            steps.forEach(step => {
+              if (step?.draft?.documentNumber) {
+                const docNum = step.draft.documentNumber;
+                if (type === 'PROFORMA' && docNum.length === 5 && docNum.endsWith(currentYearStr)) {
+                  const seq = parseInt(docNum.substring(0, 3), 10);
+                  if (!isNaN(seq) && seq > maxSequence) maxSequence = seq;
+                } else if (type === 'FACTURE' && docNum.length === 5 && docNum.startsWith(currentYearStr)) {
+                  const seq = parseInt(docNum.substring(2), 10);
+                  if (!isNaN(seq) && seq > maxSequence) maxSequence = seq;
+                }
+              }
+            });
+            (e.documentHistory || []).forEach(dh => {
+              if (dh.documentType === type && dh.draftSnapshot?.documentNumber) {
+                const docNum = dh.draftSnapshot.documentNumber;
+                if (type === 'PROFORMA' && docNum.length === 5 && docNum.endsWith(currentYearStr)) {
+                  const seq = parseInt(docNum.substring(0, 3), 10);
+                  if (!isNaN(seq) && seq > maxSequence) maxSequence = seq;
+                } else if (type === 'FACTURE' && docNum.length === 5 && docNum.startsWith(currentYearStr)) {
+                  const seq = parseInt(docNum.substring(2), 10);
+                  if (!isNaN(seq) && seq > maxSequence) maxSequence = seq;
+                }
+              }
+            });
+          });
+        });
+
+        const nextSequence = maxSequence + 1;
+        const seqFormatted = nextSequence.toString().padStart(3, '0');
+
+        if (type === 'PROFORMA') {
+          return `${seqFormatted}${currentYearStr}`; // Ex: 00126
+        } else {
+          return `${currentYearStr}${seqFormatted}`; // Ex: 26001
+        }
       },
       addDossierPaiement: async (dossierData) => {
         const id = uuidv4();
@@ -1137,15 +1298,80 @@ export const useStore = create<AppState>()(
         );
         state.updateProject(projectId, { encaissements: updatedEncaissements });
       },
-      dissociateDossier: async (dossierId) => {
+      dissociateDossier: async (dossierId, restoreProformas = false) => {
         const state = get();
+        const currentUser = auth.currentUser;
+        const userName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Utilisateur';
         
-        // Let's use updateProject to persist
+        let primaryFound = false;
+
         state.projects.forEach(p => {
           if (p.encaissements?.some(e => e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId)) {
              const updated = p.encaissements.map(e => {
                 if (e.combinedWithDossierId === dossierId || (e as any).dossierId === dossierId) {
-                   return { ...e, isCombined: false, combinedWithDossierId: null, dossierId: null };
+                   const newE = { ...e };
+                   newE.isCombined = false;
+                   delete newE.combinedWithDossierId;
+                   delete (newE as any).dossierId;
+                   
+                   const newHistory = [...(newE.documentHistory || [])];
+
+                   if (!primaryFound) {
+                      primaryFound = true;
+                      if (newE.proforma && newE.proforma.status !== 'PENDING') {
+                         newE.proforma = { ...newE.proforma, status: 'CANCELLED' };
+                     newHistory.push({
+                        id: uuidv4(),
+                        date: new Date().toISOString(),
+                        documentType: 'PROFORMA',
+                        action: 'Proforma fusionnée annulée suite à la dissociation',
+                        user: userName,
+                        draftSnapshot: newE.proforma.draft
+                     });
+                      }
+                   }
+                   
+                   if (restoreProformas) {
+                      const profCancelIdx = newHistory.findIndex(h => h.action.includes('Facturation individuelle annulée') && h.documentType === 'PROFORMA');
+                      let oldProfDraft = null;
+                      if (profCancelIdx > 0) {
+                         for (let i = profCancelIdx - 1; i >= 0; i--) {
+                            if (newHistory[i].documentType === 'PROFORMA' && newHistory[i].draftSnapshot) {
+                               oldProfDraft = newHistory[i].draftSnapshot;
+                               break;
+                            }
+                         }
+                      }
+                      
+                      if (oldProfDraft) {
+                         newE.proforma = { ...newE.proforma, status: 'GENERATED', draft: oldProfDraft };
+                         newHistory.push({
+                            id: uuidv4(),
+                            date: new Date().toISOString(),
+                            documentType: 'PROFORMA',
+                            action: 'Proforma individuelle restaurée suite à la dissociation',
+                            user: userName
+                         });
+                      } else {
+                         newE.proforma = { ...newE.proforma, status: 'PENDING' };
+                         delete newE.proforma.draft;
+                      }
+                   } else {
+                      const currentDraft = newE.proforma.draft;
+                      newE.proforma = { ...newE.proforma, status: 'PENDING' };
+                      delete newE.proforma.draft;
+                      newHistory.push({
+                         id: uuidv4(),
+                         date: new Date().toISOString(),
+                         documentType: 'PROFORMA',
+                         action: 'Annulée suite à la dissociation - À regénérer',
+                         user: userName,
+                         draftSnapshot: currentDraft
+                      });
+                   }
+                   
+                   newE.documentHistory = newHistory;
+                   return newE;
                 }
                 return e;
              });
@@ -1153,7 +1379,6 @@ export const useStore = create<AppState>()(
           }
         });
         
-        // 2. Delete the dossier
         state.deleteDossierPaiement(dossierId);
       },
       addHistoryEvent: (projectId, message) => {

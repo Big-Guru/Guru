@@ -24,7 +24,7 @@ const ALGERIAN_WILAYAS = [
 const TECH_COLLABS = ["Arslane", "Hamza", "Fay", "Karim", "Khamis", "Mouad"];
 
 export default function ProjectList() {
-  const { projects, clients, addProject } = useStore();
+  const { projects, clients, products, addProject } = useStore();
 
   const [search, setSearch] = useState('');
   const [showNewProject, setShowNewProject] = useState(false);
@@ -41,7 +41,8 @@ export default function ProjectList() {
     mode: 'Acquisition' as 'Acquisition' | 'Maintenance offerte' | 'Maintenance',
     phase: 'Démarchage' as 'Démarchage' | 'Adaptation' | 'Encaissement' | 'Recouvrement',
     status: 'Actif' as 'Actif' | 'Effectué' | 'Suspendu' | 'Abandonné',
-    createdAt: new Date().toISOString().split('T')[0]
+    createdAt: new Date().toISOString().split('T')[0],
+    maintenancePeriodicity: 'Annuelle' as 'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle'
   });
 
   const handleAddProject = (e: React.FormEvent) => {
@@ -63,6 +64,7 @@ export default function ProjectList() {
       status: newProjectData.status,
       createdAt: newProjectData.createdAt,
       installationDate: newProjectData.createdAt,
+      maintenancePeriodicity: newProjectData.maintenancePeriodicity,
     });
 
     setShowNewProject(false);
@@ -78,7 +80,8 @@ export default function ProjectList() {
       mode: 'Acquisition',
       phase: 'Démarchage',
       status: 'Actif',
-      createdAt: new Date().toISOString().split('T')[0]
+      createdAt: new Date().toISOString().split('T')[0],
+      maintenancePeriodicity: 'Annuelle'
     });
   };
 
@@ -163,7 +166,33 @@ export default function ProjectList() {
           <p className="text-xs text-slate-500 font-medium mt-0.5">Pilotez vos portefeuilles projets, contrats, modes de facturation et contacts associés.</p>
         </div>
         <button
-          onClick={() => setShowNewProject(true)}
+          onClick={() => {
+            if (products && products.length > 0) {
+              const firstProd = products[0];
+              setNewProjectData({
+                clientId: '',
+                name: '',
+                departement: firstProd.departement,
+                product: firstProd.name as any,
+                wilaya: '',
+                ville: '',
+                entity: firstProd.defaultEntity,
+                technique: [],
+                mode: 'Acquisition',
+                phase: 'Démarchage',
+                status: 'Actif',
+                createdAt: new Date().toISOString().split('T')[0],
+                maintenancePeriodicity: firstProd.maintenancePeriodicity as any
+              });
+            } else {
+              setNewProjectData({
+                clientId: '', name: '', departement: 'D1', product: 'PAYE', wilaya: '', ville: '',
+                entity: 'Naltis', technique: [], mode: 'Acquisition', phase: 'Démarchage', status: 'Actif',
+                createdAt: new Date().toISOString().split('T')[0], maintenancePeriodicity: 'Annuelle'
+              });
+            }
+            setShowNewProject(true);
+          }}
           className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl shadow-md shadow-blue-500/10 hover:opacity-95 transition-all duration-200 shrink-0 self-start sm:self-center"
         >
           <Plus className="w-4.5 h-4.5" />
@@ -228,8 +257,8 @@ export default function ProjectList() {
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Département</label>
                 <select
-                  required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                  disabled
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none cursor-not-allowed font-semibold text-slate-500"
                   value={newProjectData.departement}
                   onChange={e => setNewProjectData({ ...newProjectData, departement: e.target.value })}
                 >
@@ -244,15 +273,26 @@ export default function ProjectList() {
                   required
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
                   value={newProjectData.product}
-                  onChange={e => setNewProjectData({ ...newProjectData, product: e.target.value })}
+                  onChange={e => {
+                    const prodName = e.target.value;
+                    const prodConfig = products.find(p => p.name === prodName);
+                    if (prodConfig) {
+                      setNewProjectData({
+                        ...newProjectData,
+                        product: prodName,
+                        departement: prodConfig.departement,
+                        entity: prodConfig.defaultEntity,
+                        maintenancePeriodicity: prodConfig.maintenancePeriodicity
+                      });
+                    } else {
+                      setNewProjectData({ ...newProjectData, product: prodName });
+                    }
+                  }}
                 >
-                  <option value="PAYE">Paye (PAYE)</option>
-                  <option value="BUDGET">Budget (BUDGET)</option>
-                  <option value="BUDGET_APC">Budget APC (BUDGET_APC)</option>
-                  <option value="STOCKS">Stocks (STOCKS)</option>
-                  <option value="GRH">GRH</option>
-                  <option value="PHARMATIS">Pharmatis</option>
-                  <option value="GBS">GBS</option>
+                  {products.length === 0 && <option value="PAYE">Aucun produit dynamique trouvé (par défaut PAYE)</option>}
+                  {products.map(p => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -284,8 +324,8 @@ export default function ProjectList() {
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Entité responsable</label>
                 <select
-                  required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                  disabled
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none cursor-not-allowed font-semibold text-slate-500"
                   value={newProjectData.entity}
                   onChange={e => setNewProjectData({ ...newProjectData, entity: e.target.value as any })}
                 >
@@ -321,6 +361,21 @@ export default function ProjectList() {
                   <option value="Adaptation">Adaptation</option>
                   <option value="Encaissement">Encaissement</option>
                   <option value="Recouvrement">Recouvrement</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Processus d'intégration (Maintenance)</label>
+                <select
+                  disabled
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none cursor-not-allowed font-semibold text-slate-500"
+                  value={newProjectData.maintenancePeriodicity}
+                  onChange={e => setNewProjectData({ ...newProjectData, maintenancePeriodicity: e.target.value as any })}
+                >
+                  <option value="Annuelle">Annuelle</option>
+                  <option value="Semestrielle">Semestrielle</option>
+                  <option value="Trimestrielle">Trimestrielle</option>
+                  <option value="Mensuelle">Mensuelle</option>
                 </select>
               </div>
 
@@ -423,68 +478,57 @@ export default function ProjectList() {
                   key={`${project.id}-${index}`}
                   to={`/projects/${project.id}`}
                   className={cn(
-                    "relative rounded-3xl p-6 shadow-md hover:shadow-2xl transition-all duration-300 hover:-translate-y-1.5 flex flex-col justify-between min-h-[220px] overflow-hidden group border border-white/10",
+                    "cursor-pointer shrink-0 flex flex-col justify-between p-6 rounded-[28px] min-h-[190px] text-left transition-all duration-500 border overflow-hidden relative group hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] border-white/10",
                     getGradientStyle(project.product)
                   )}
                 >
-                  {/* Top row: Nom */}
-                  <div className="flex justify-between items-start gap-4">
-                    <div className="space-y-0.5">
-                      <h4 className="font-extrabold text-lg tracking-tight leading-tight drop-shadow-sm group-hover:underline decoration-white/30 decoration-2 underline-offset-4 uppercase">
-                        {client?.name || project.name}
-                      </h4>
-                      <div className="pt-1.5">
-                        <span className="inline-block bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded border border-white/20 text-[9px] font-black tracking-widest uppercase shadow-sm">
-                          {project.product}
-                        </span>
+                  <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-white/20"></div>
+                  <div className="absolute -left-10 -bottom-10 w-32 h-32 rounded-full blur-3xl z-0 pointer-events-none bg-black/10"></div>
+
+                  <div className="relative z-10 flex flex-col h-full pt-1 w-full">
+                    <h4 className="font-extrabold text-[22px] tracking-tight leading-none mb-1.5 drop-shadow-md text-white line-clamp-2 uppercase">
+                      {client?.name || project.name}
+                    </h4>
+                    <p className="font-bold text-[13px] text-white/90 drop-shadow-sm line-clamp-1">{project.product}</p>
+                    
+                    <div className="flex flex-col gap-2.5 w-full mt-auto pt-4">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/80">
+                        Créé: {project.createdAt ? new Date(project.createdAt).toLocaleDateString('fr-FR') : 'Non défini'}
+                      </span>
+                      
+                      <div className="flex justify-between items-end">
+                        <div className="flex flex-col gap-1.5 relative w-[60%]">
+                           {project.contracts?.filter(c => c.status === 'ACTIVE').slice(0, 1).map(contract => {
+                              const activePhase = contract.phases?.find(p => p.status === 'ACTIVE') || contract.phases?.find(p => p.status === 'PENDING') || contract.phases?.[0];
+                              return (
+                                <div key={contract.id} className="flex flex-col mt-1">
+                                  <div className="text-xs font-extrabold text-white line-clamp-1 mb-1.5">
+                                    {contract.name}
+                                  </div>
+                                  <div className="flex gap-1.5 flex-wrap">
+                                  {activePhase?.tasks?.map((task: any, i: number) => (
+                                    <div 
+                                      key={i} 
+                                      title={`${task.name} : ${task.status}`}
+                                      className={cn(
+                                        "w-2 h-2 rounded-full transition-all duration-300 shrink-0",
+                                        task.status === 'DONE' ? 'bg-emerald-400' : 
+                                        task.status === 'IN_PROGRESS' ? 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-pulse' : 
+                                        task.status === 'CANCELED' ? 'bg-red-400' :
+                                        'bg-white/30'
+                                      )}
+                                    />
+                                  ))}
+                                  </div>
+                                </div>
+                              );
+                           })}
+                        </div>
+                        <div className="font-black text-xs text-white/90 bg-black/10 px-2 py-1 rounded-lg backdrop-blur-md">
+                          {openContractsCount} ACTIF{openContractsCount > 1 ? 'S' : ''}
+                        </div>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Bottom Section: Active Modes & Tasks */}
-                  <div className="mt-auto pt-4 space-y-3">
-                    {project.contracts?.filter(c => c.status === 'ACTIVE').map(contract => {
-                       const activePhase = contract.phases?.find(p => p.status === 'ACTIVE') || contract.phases?.find(p => p.status === 'PENDING') || contract.phases?.[0];
-                       return (
-                         <div key={contract.id} className="flex flex-col">
-                            <div className="text-sm font-extrabold text-white">
-                              {contract.name}
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[11px] font-bold text-white/80">
-                                {activePhase?.name || 'Non définie'}
-                              </span>
-                              <span className="w-1 h-1 rounded-full bg-white/40"></span>
-                              <span className="px-1.5 py-0.5 rounded-md uppercase tracking-wider text-[9px] font-black bg-white/20 text-white shadow-sm">
-                                {project.status || 'Actif'}
-                              </span>
-                            </div>
-                            {/* Petits points des tâches pour la phase active */}
-                            {activePhase?.tasks && activePhase.tasks.length > 0 && (
-                              <div className="flex gap-1 mt-2 w-full max-w-[120px]">
-                                {activePhase.tasks.map((task: any, i: number) => (
-                                  <div 
-                                    key={i} 
-                                    title={`${task.name} : ${task.status}`}
-                                    className={cn(
-                                      "flex-1 h-1 rounded-full transition-all duration-300",
-                                      task.status === 'DONE' ? 'bg-emerald-400' : 
-                                      task.status === 'IN_PROGRESS' ? 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-pulse' : 
-                                      task.status === 'CANCELED' ? 'bg-red-400' :
-                                      'bg-white/30'
-                                    )}
-                                  />
-                                ))}
-                              </div>
-                            )}
-                         </div>
-                       );
-                    })}
-                    {(!project.contracts || project.contracts.filter(c => c.status === 'ACTIVE').length === 0) && (
-                       <div className="text-sm font-bold text-white/60 italic">
-                         Aucun mode actif
-                       </div>
-                    )}
                   </div>
                 </Link>
               );

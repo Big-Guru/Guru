@@ -29,6 +29,11 @@ interface FacturationLine {
   // Reference object for updates
   dossierRef?: DossierPaiement;
   encaissementRef?: EncaissementRecord;
+  isCancelledChild?: boolean;
+  children?: FacturationLine[];
+  oldProfDraft?: any;
+  oldFactDraft?: any;
+  isPastFused?: boolean;
 }
 
 export default function FacturationList() {
@@ -58,40 +63,109 @@ export default function FacturationList() {
     const client = clients.find(c => c.id === project.clientId);
     if (!client) return;
     
-    const indepEncs = (project.encaissements || []).filter(e => !e.isCombined && e.proforma?.status !== 'PENDING');
+    const indepEncs = (project.encaissements || []).filter(e => !e.isCombined);
     
     indepEncs.forEach(enc => {
-      let emetteur = enc.emetteur || '';
-      if (!emetteur) {
-        const profHistory = enc.documentHistory?.find(h => h.documentType === 'PROFORMA');
-        if (profHistory) emetteur = profHistory.user || '-';
-        else emetteur = '-';
+      // 1. Current Active Proforma (if not pending)
+      if (enc.proforma?.status !== 'PENDING') {
+        let emetteur = enc.emetteur || '';
+        if (!emetteur) {
+          const profHistory = enc.documentHistory?.find(h => h.documentType === 'PROFORMA');
+          if (profHistory) emetteur = profHistory.user || '-';
+          else emetteur = '-';
+        }
+
+        const profDraft = enc.proforma.draft;
+        const factDraft = enc.facture.draft;
+
+        lines.push({
+          id: `enc-${enc.id}`,
+          isDossier: false,
+          encaissementId: enc.id,
+          projectId: project.id,
+          dateStr: profDraft ? new Date(profDraft.createdAt).toLocaleDateString('fr-FR') : '-',
+          dateObj: profDraft ? new Date(profDraft.createdAt) : new Date(0),
+          numProf: profDraft?.documentNumber || '-',
+          clientName: client.name,
+          productVersion: `${project.product} ${project.version ? `/ ${project.version}` : ''}`,
+          mode: enc.mode,
+          numBc: enc.bc?.documentId || '-',
+          numFacture: factDraft?.documentNumber || '-',
+          etatProforma: enc.proforma.status,
+          etatFacture: enc.facture.status,
+          emetteur: emetteur,
+          potentiel: enc.potentiel || '',
+          encaissementCetteAnnee: enc.encaissementCetteAnnee || '',
+          observation: enc.observation || '',
+          entity: project.entity || 'Naltis',
+          encaissementRef: enc
+        });
       }
 
-      const profDraft = enc.proforma.draft;
-      const factDraft = enc.facture.draft;
+      // 2. Historical Cancelled Proformas
+      const pastProformas = new Map<string, { draft: any, emetteur: string, date: string, isFused: boolean }>();
+      
+      if (enc.documentHistory) {
+         let backwardIsFused = false;
+         
+         // We can just iterate normally now, no need to track state across events
+         for (let i = 0; i < enc.documentHistory.length; i++) {
+            const h = enc.documentHistory[i];
+            
+            if (h.documentType === 'PROFORMA' && h.draftSnapshot && h.draftSnapshot.documentNumber) {
+               const num = h.draftSnapshot.documentNumber;
+               
+               // Skip if it's the current active one
+               if (enc.proforma?.status !== 'PENDING' && enc.proforma.draft?.documentNumber === num) {
+                  // do nothing
+               } else {
+                  // Fused proformas are generated with items via FacturationDossierModal.
+                  // A true fused proforma combines multiple encaissements, so it will have > 1 items.
+                  // Single encaissement dossiers will have exactly 1 item.
+                  const isFused = Array.isArray(h.draftSnapshot.items) && h.draftSnapshot.items.length > 1;
 
-      lines.push({
-        id: `enc-${enc.id}`,
-        isDossier: false,
-        encaissementId: enc.id,
-        projectId: project.id,
-        dateStr: profDraft ? new Date(profDraft.createdAt).toLocaleDateString('fr-FR') : '-',
-        dateObj: profDraft ? new Date(profDraft.createdAt) : new Date(0),
-        numProf: profDraft?.documentNumber || '-',
-        clientName: client.name,
-        productVersion: `${project.product} ${project.version ? `/ ${project.version}` : ''}`,
-        mode: enc.mode,
-        numBc: enc.bc?.documentId || '-',
-        numFacture: factDraft?.documentNumber || '-',
-        etatProforma: enc.proforma.status,
-        etatFacture: enc.facture.status,
-        emetteur: emetteur,
-        potentiel: enc.potentiel || '',
-        encaissementCetteAnnee: enc.encaissementCetteAnnee || '',
-        observation: enc.observation || '',
-        entity: project.entity || 'Naltis',
-        encaissementRef: enc
+                  if (!pastProformas.has(num)) {
+                     pastProformas.set(num, { 
+                        draft: h.draftSnapshot, 
+                        emetteur: h.user || 'Système', 
+                        date: h.date, 
+                        isFused: isFused 
+                     });
+                  } else {
+                     if (isFused) {
+                        pastProformas.get(num)!.isFused = true;
+                     }
+                  }
+               }
+            }
+         }
+      }
+
+      pastProformas.forEach((info, num) => {
+         lines.push({
+            id: `enc-${enc.id}-past-${num}`,
+            isDossier: false,
+            encaissementId: enc.id,
+            projectId: project.id,
+            dateStr: new Date(info.draft.createdAt).toLocaleDateString('fr-FR'),
+            dateObj: new Date(info.draft.createdAt),
+            numProf: num,
+            clientName: client.name,
+            productVersion: `${project.product} ${project.version ? `/ ${project.version}` : ''}`,
+            mode: enc.mode,
+            numBc: enc.bc?.documentId || '-',
+            numFacture: '-', // Simplified for cancelled past proformas
+            etatProforma: 'CANCELLED',
+            etatFacture: 'PENDING',
+            emetteur: info.emetteur,
+            potentiel: enc.potentiel || '',
+            encaissementCetteAnnee: enc.encaissementCetteAnnee || '',
+            observation: enc.observation || '',
+            entity: project.entity || 'Naltis',
+            encaissementRef: enc,
+            oldProfDraft: info.draft,
+            isPastFused: info.isFused
+         });
       });
     });
   });
@@ -141,6 +215,67 @@ export default function FacturationList() {
       const profDraft = primaryEnc.proforma.draft;
       const factDraft = primaryEnc.facture.draft;
 
+      const dossierChildren: FacturationLine[] = [];
+      for (const projectId of dossier.projectIds) {
+        const proj = projects.find(p => p.id === projectId);
+        if (proj) {
+          const encs = proj.encaissements?.filter(e => e.combinedWithDossierId === dossier.id || (e as any).dossierId === dossier.id);
+          if (encs && encs.length > 0) {
+            encs.forEach(enc => {
+               const profCancelIdx = enc.documentHistory?.findIndex(h => h.action.includes('Facturation individuelle annulée') && h.documentType === 'PROFORMA') ?? -1;
+               let oldProfDraft = null;
+               let profEmetteur = 'Système';
+               if (profCancelIdx > 0) {
+                  for (let i = profCancelIdx - 1; i >= 0; i--) {
+                     if (enc.documentHistory![i].documentType === 'PROFORMA' && enc.documentHistory![i].draftSnapshot) {
+                        oldProfDraft = enc.documentHistory![i].draftSnapshot;
+                        profEmetteur = enc.documentHistory![i].user || 'Système';
+                        break;
+                     }
+                  }
+               }
+
+               const factCancelIdx = enc.documentHistory?.findIndex(h => h.action.includes('Facturation individuelle annulée') && h.documentType === 'FACTURE') ?? -1;
+               let oldFactDraft = null;
+               if (factCancelIdx > 0) {
+                  for (let i = factCancelIdx - 1; i >= 0; i--) {
+                     if (enc.documentHistory![i].documentType === 'FACTURE' && enc.documentHistory![i].draftSnapshot) {
+                        oldFactDraft = enc.documentHistory![i].draftSnapshot;
+                        break;
+                     }
+                  }
+               }
+
+               dossierChildren.push({
+                  id: `child-${enc.id}`,
+                  isDossier: false,
+                  encaissementId: enc.id,
+                  projectId: proj.id,
+                  dateStr: oldProfDraft ? new Date(oldProfDraft.createdAt).toLocaleDateString('fr-FR') : '-',
+                  dateObj: oldProfDraft ? new Date(oldProfDraft.createdAt) : new Date(0),
+                  numProf: oldProfDraft?.documentNumber || '-',
+                  clientName: client.name,
+                  productVersion: `${proj.product} ${proj.version ? `/ ${proj.version}` : ''}`,
+                  mode: enc.mode,
+                  numBc: enc.bc?.documentId || '-',
+                  numFacture: oldFactDraft?.documentNumber || '-',
+                  etatProforma: 'CANCELLED',
+                  etatFacture: enc.facture.status === 'CANCELLED' ? 'CANCELLED' : enc.facture.status, // Facture might not be cancelled if not generated
+                  emetteur: profEmetteur,
+                  potentiel: '',
+                  encaissementCetteAnnee: '',
+                  observation: '',
+                  entity: proj.entity || 'Naltis',
+                  encaissementRef: enc,
+                  isCancelledChild: true,
+                  oldProfDraft,
+                  oldFactDraft
+               });
+            });
+          }
+        }
+      }
+
       lines.push({
         id: `dos-${dossier.id}`,
         isDossier: true,
@@ -155,15 +290,16 @@ export default function FacturationList() {
         mode: Array.from(modes).join(' & '),
         numBc: primaryEnc.bc?.documentId || '-',
         numFacture: factDraft?.documentNumber || '-',
-        etatProforma: primaryEnc.proforma.status,
-        etatFacture: primaryEnc.facture.status,
+        etatProforma: primaryEnc.proforma.status === 'CANCELLED' ? 'PENDING' : primaryEnc.proforma.status,
+        etatFacture: primaryEnc.facture.status === 'CANCELLED' ? 'PENDING' : primaryEnc.facture.status,
         emetteur: emetteur,
         potentiel: dossier.potentiel || '',
         encaissementCetteAnnee: dossier.encaissementCetteAnnee || '',
         observation: dossier.observation || '',
         entity: dossierEntity,
         dossierRef: dossier,
-        encaissementRef: primaryEnc
+        encaissementRef: primaryEnc,
+        children: dossierChildren
       });
     }
   });
@@ -177,15 +313,22 @@ export default function FacturationList() {
     const matchSearch = line.clientName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                         line.numProf.toLowerCase().includes(searchTerm.toLowerCase());
     return matchEntity && matchSearch;
+  }).sort((a, b) => {
+    if (a.numProf === '-' && b.numProf !== '-') return 1;
+    if (a.numProf !== '-' && b.numProf === '-') return -1;
+    if (a.numProf === '-' && b.numProf === '-') return 0;
+    return a.numProf.localeCompare(b.numProf);
   });
 
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'PENDING': return 'En attente';
       case 'GENERATED': return 'Générée';
-      case 'TO_VERIFY': return 'À valider';
+      case 'TO_VERIFY': return 'Soumise à validation';
       case 'VALIDATED': return 'Validée';
+      case 'DEPOSITED': return 'Transmise';
       case 'RECOVERED': return 'Récupéré';
+      case 'CANCELLED': return 'Annulée';
       default: return status;
     }
   };
@@ -196,7 +339,9 @@ export default function FacturationList() {
       case 'GENERATED': return 'bg-blue-50 text-blue-600 border-blue-200';
       case 'TO_VERIFY': return 'bg-amber-50 text-amber-600 border-amber-200';
       case 'VALIDATED': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
-      case 'RECOVERED': return 'bg-purple-50 text-purple-600 border-purple-200';
+      case 'DEPOSITED': return 'bg-purple-50 text-purple-600 border-purple-200';
+      case 'RECOVERED': return 'bg-slate-800 text-white border-slate-700';
+      case 'CANCELLED': return 'bg-red-50 text-red-600 border-red-200 line-through opacity-70';
       default: return 'bg-slate-50 text-slate-600 border-slate-200';
     }
   };
@@ -273,8 +418,18 @@ export default function FacturationList() {
                 </tr>
               ) : (
                 filteredLines.map(line => (
-                  <tr key={line.id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">{line.dateStr}</td>
+                  <React.Fragment key={line.id}>
+                  <tr className={cn(
+                    "hover:bg-slate-50/50 transition-colors group", 
+                    line.isDossier ? "bg-purple-50/30" : "",
+                    line.etatProforma === 'CANCELLED' && !line.isPastFused ? "opacity-50 bg-slate-100/50 grayscale-[30%]" : "",
+                    line.isPastFused ? "bg-purple-50/70" : ""
+                  )}>
+                    <td className="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">
+                      {line.isDossier && <div className="inline-block w-2 h-2 rounded-full bg-purple-500 mr-2 shadow-sm" title="Dossier Fusionné"></div>}
+                      {line.isPastFused && <div className="inline-block w-2 h-2 rounded-full bg-purple-400 mr-2 shadow-sm opacity-60" title="Ancienne Proforma Fusionnée Annulée"></div>}
+                      {line.dateStr}
+                    </td>
                     
                     <td className="px-4 py-3">
                       <button 
@@ -284,7 +439,8 @@ export default function FacturationList() {
                           encaissementId: line.encaissementId!,
                           projectId: line.projectId!,
                           isReadOnly: true,
-                          readOnlyStatus: line.etatProforma
+                          readOnlyStatus: line.etatProforma,
+                          draftSnapshot: line.oldProfDraft
                         })}
                         className="font-black text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1.5"
                       >
@@ -317,7 +473,8 @@ export default function FacturationList() {
                            encaissementId: line.encaissementId!,
                            projectId: line.projectId!,
                            isReadOnly: true,
-                           readOnlyStatus: line.etatFacture
+                           readOnlyStatus: line.etatFacture,
+                           draftSnapshot: line.oldFactDraft
                          })}
                          className="font-black text-emerald-600 hover:text-emerald-800 hover:underline flex items-center gap-1.5"
                        >
@@ -351,7 +508,8 @@ export default function FacturationList() {
                             updateEncaissement(line.projectId, line.encaissementId, { potentiel: val });
                           }
                         }}
-                        className="bg-slate-50 border border-slate-200 rounded text-xs p-1 outline-none focus:border-indigo-500 font-semibold text-slate-700"
+                        disabled={line.etatProforma === 'CANCELLED'}
+                        className="bg-slate-50 border border-slate-200 rounded text-xs p-1 outline-none focus:border-indigo-500 font-semibold text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <option value="">Sélectionner</option>
                         <option value="Faible">Faible</option>
@@ -371,7 +529,8 @@ export default function FacturationList() {
                             updateEncaissement(line.projectId, line.encaissementId, { encaissementCetteAnnee: val });
                           }
                         }}
-                        className="bg-slate-50 border border-slate-200 rounded text-xs p-1 outline-none focus:border-indigo-500 font-semibold text-slate-700"
+                        disabled={line.etatProforma === 'CANCELLED'}
+                        className="bg-slate-50 border border-slate-200 rounded text-xs p-1 outline-none focus:border-indigo-500 font-semibold text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <option value="">Sélectionner</option>
                         <option value="Probable">Probable</option>
@@ -402,6 +561,53 @@ export default function FacturationList() {
                       </button>
                     </td>
                   </tr>
+                  
+                  {/* Children lines (Cancelled encaissements) */}
+                  {line.children && line.children.length > 0 && [...line.children].sort((a, b) => {
+                    if (a.numProf === '-' && b.numProf !== '-') return 1;
+                    if (a.numProf !== '-' && b.numProf === '-') return -1;
+                    if (a.numProf === '-' && b.numProf === '-') return 0;
+                    return a.numProf.localeCompare(b.numProf);
+                  }).map(child => (
+                    <tr key={child.id} className="bg-slate-50/50 group">
+                      <td className="px-4 py-2 font-semibold text-slate-400 whitespace-nowrap pl-8 relative">
+                        <div className="absolute left-4 top-0 bottom-1/2 w-px bg-slate-300"></div>
+                        <div className="absolute left-4 top-1/2 w-3 h-px bg-slate-300"></div>
+                        {child.dateStr}
+                      </td>
+                      <td className="px-4 py-2 opacity-50">
+                        {child.numProf !== '-' ? (
+                          <button 
+                            onClick={() => setPreviewModalConfig({
+                              isOpen: true,
+                              type: 'PROFORMA',
+                              encaissementId: child.encaissementId!,
+                              projectId: child.projectId!,
+                              isReadOnly: true,
+                              readOnlyStatus: child.etatProforma,
+                              draftSnapshot: child.oldProfDraft
+                            })}
+                            className="font-bold text-slate-500 hover:text-slate-700 hover:underline flex items-center gap-1.5"
+                          >
+                            <span className="line-through">{child.numProf}</span> <Eye className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </button>
+                        ) : '-'}
+                      </td>
+                      <td className="px-4 py-2 font-bold text-slate-500 opacity-60">{child.clientName}</td>
+                      <td className="px-4 py-2 text-[11px] font-bold text-slate-400">{child.productVersion}</td>
+                      <td className="px-4 py-2 text-[11px] font-bold text-slate-400">{child.mode}</td>
+                      <td className="px-4 py-2 font-bold text-slate-400">{child.numBc}</td>
+                      <td className="px-4 py-2 opacity-50">-</td>
+                      <td className="px-4 py-2">
+                        <div className={cn("px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider inline-block", getStatusColor(child.etatProforma))}>
+                          P: ANNULÉE (FUSION)
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 font-semibold text-slate-400 text-[11px] uppercase">{child.emetteur}</td>
+                      <td colSpan={3} className="px-4 py-2 text-slate-400 text-[10px] italic">Reconduite dans le dossier fusionné ci-dessus</td>
+                    </tr>
+                  ))}
+                  </React.Fragment>
                 ))
               )}
             </tbody>
@@ -459,7 +665,8 @@ export default function FacturationList() {
          if (!client) return null;
          
          const docObj = previewModalConfig.type === 'PROFORMA' ? targetEnc.proforma : targetEnc.facture;
-         if (!docObj.draft) return null; // Should not happen here since we only list generated docs
+         const draftToUse = previewModalConfig.draftSnapshot || docObj.draft;
+         if (!draftToUse) return null; // Should not happen here since we only list generated docs
          
          return (
             <DocumentPreviewModal
@@ -468,7 +675,7 @@ export default function FacturationList() {
                client={client}
                project={targetProject}
                encaissement={targetEnc}
-               draft={docObj.draft}
+               draft={draftToUse}
                status={previewModalConfig.readOnlyStatus || docObj.status}
                isReadOnly={true}
                onClose={() => setPreviewModalConfig({ ...previewModalConfig, isOpen: false })}

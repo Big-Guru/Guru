@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, FileText, Check, Download, Send, Edit2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, FileText, Check, Download, Send, Edit2, AlertCircle, Save } from 'lucide-react';
 import { DocumentDraft, Client, Project, EncaissementRecord, InvoicingStepStatus, DocumentHistoryEvent } from '../types';
 import { generateWordDocument } from '../lib/docxGenerator';
 import { useStore } from '../store';
@@ -15,10 +15,11 @@ interface DocumentPreviewModalProps {
   draft: DocumentDraft;
   status: string;
   isReadOnly?: boolean;
-  onSaveDraft: (draft: DocumentDraft) => void;
-  onSubmitValidation: () => void;
-  onValidate: () => void;
-  onDeposit: () => void;
+  autoSave?: boolean;
+  onSaveDraft?: (draft: DocumentDraft, actionLabel?: string) => void;
+  onSubmitValidation?: () => void;
+  onValidate?: () => void;
+  onDeposit?: () => void;
 }
 
 export default function DocumentPreviewModal({
@@ -30,7 +31,8 @@ export default function DocumentPreviewModal({
   encaissement,
   draft,
   status,
-  isReadOnly,
+  isReadOnly = false,
+  autoSave = false,
   onSaveDraft,
   onSubmitValidation,
   onValidate,
@@ -38,13 +40,20 @@ export default function DocumentPreviewModal({
 }: DocumentPreviewModalProps) {
   const [editedDraft, setEditedDraft] = useState<DocumentDraft>(draft);
   const [isEditing, setIsEditing] = useState(false);
+  const [hasAutoSaved, setHasAutoSaved] = useState(false);
+  
+  useEffect(() => {
+    setEditedDraft(draft);
+  }, [draft]);
   const { addDocumentHistoryEvent } = useStore();
+
+  // Auto-save removed to prevent duplicate history entries on initial generation
 
   if (!isOpen) return null;
 
   const handleSave = () => {
-    onSaveDraft({ ...editedDraft, updatedAt: new Date().toISOString() });
-    setIsEditing(false);
+    if (onSaveDraft) onSaveDraft({ ...editedDraft, updatedAt: new Date().toISOString() }, 'Brouillon enregistré');
+    onClose();
   };
 
   const handleDownload = async () => {
@@ -86,7 +95,7 @@ export default function DocumentPreviewModal({
                   status === 'GENERATED' ? 'Brouillon (Modifiable)' :
                   status === 'TO_VERIFY' ? 'En attente de validation' :
                   status === 'VALIDATED' ? 'Validée (Prête)' :
-                  status === 'DEPOSITED' ? 'Déposée chez le client' : status
+                  status === 'DEPOSITED' ? 'Transmise' : status
                 }
               </p>
             </div>
@@ -216,23 +225,29 @@ export default function DocumentPreviewModal({
         {/* Footer Actions */}
         <div className="bg-white border-t border-slate-200 p-6 flex items-center justify-between">
           <div className="flex gap-2">
-            {(status === 'GENERATED' || status === 'TO_VERIFY') && !isEditing && (
-              <button 
-                onClick={() => setIsEditing(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-bold uppercase transition-colors"
-              >
-                <Edit2 className="w-4 h-4" />
-                Modifier
-              </button>
-            )}
-            {isEditing && (
-              <button 
-                onClick={handleSave}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-xl text-xs font-bold uppercase transition-colors"
-              >
-                <Check className="w-4 h-4" />
-                Sauvegarder
-              </button>
+            {(status === 'PENDING' || status === 'CANCELLED' || status === 'GENERATED' || status === 'TO_VERIFY') && (
+              <>
+                <button 
+                  onClick={() => setIsEditing(!isEditing)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase transition-colors",
+                    isEditing 
+                      ? "bg-blue-100 text-blue-700 hover:bg-blue-200" 
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  )}
+                >
+                  <Edit2 className="w-4 h-4" />
+                  {isEditing ? 'Terminer modification' : 'Modifier'}
+                </button>
+                
+                <button 
+                  onClick={handleSave}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-xl text-xs font-bold uppercase transition-colors"
+                >
+                  <Save className="w-4 h-4" />
+                  Sauvegarder
+                </button>
+              </>
             )}
           </div>
 
@@ -247,9 +262,12 @@ export default function DocumentPreviewModal({
                </button>
             ) : (
               <>
-                {status === 'GENERATED' && !isEditing && (
+                {(status === 'PENDING' || status === 'CANCELLED' || status === 'GENERATED') && (
                   <button 
-                    onClick={onSubmitValidation}
+                    onClick={() => {
+                      if (onSaveDraft) onSaveDraft({ ...editedDraft, updatedAt: new Date().toISOString() });
+                      if (onSubmitValidation) onSubmitValidation();
+                    }}
                     className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 text-white hover:bg-amber-600 rounded-xl text-xs font-black uppercase tracking-wider transition-colors shadow-lg shadow-amber-500/20"
                   >
                     <Send className="w-4 h-4" />
@@ -257,9 +275,12 @@ export default function DocumentPreviewModal({
                   </button>
                 )}
 
-                {status === 'TO_VERIFY' && !isEditing && (
+                {status === 'TO_VERIFY' && (
                   <button 
-                    onClick={onValidate}
+                    onClick={() => {
+                      if (onSaveDraft) onSaveDraft({ ...editedDraft, updatedAt: new Date().toISOString() });
+                      if (onValidate) onValidate();
+                    }}
                     className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl text-xs font-black uppercase tracking-wider transition-colors shadow-lg shadow-emerald-500/20"
                   >
                     <Check className="w-4 h-4" />
@@ -278,11 +299,13 @@ export default function DocumentPreviewModal({
                     </button>
                     {status === 'VALIDATED' && (
                       <button 
-                        onClick={onDeposit}
+                        onClick={() => {
+                          if (onDeposit) onDeposit();
+                        }}
                         className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white hover:bg-purple-700 rounded-xl text-xs font-black uppercase tracking-wider transition-colors shadow-lg shadow-purple-600/20"
                       >
                         <AlertCircle className="w-4 h-4" />
-                        Marquer Déposée
+                        Marquer Transmise
                       </button>
                     )}
                   </>

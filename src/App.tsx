@@ -11,6 +11,7 @@ import ClientDetails from './components/ClientDetails';
 import ProjectDetails from './components/ProjectDetails';
 import ClientForm from './components/ClientForm';
 import ProjectList from './components/ProjectList';
+import ProductsList from './components/ProductsList';
 import AlertsList from './components/AlertsList';
 import MissionsList from './components/MissionsList';
 import EncaissementsList from './components/EncaissementsList';
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="encaissements" element={<EncaissementsList />} />
             <Route path="missions" element={<MissionsList />} />
             <Route path="facturation" element={<FacturationList />} />
+            <Route path="products" element={<ProductsList />} />
             <Route path="*" element={<div className="p-8">Oups ! Page introuvable.</div>} />
           </Route>
         </Routes>
