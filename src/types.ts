@@ -164,11 +164,16 @@ export interface ProductConfig {
   departement: 'D1' | 'D2';
   defaultEntity: 'Naltis' | 'Netsprint' | 'MP';
   maintenancePeriodicity: 'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle';
+  processType?: 'STANDARD' | 'DIRECT_MAINTENANCE' | 'MAINTENANCE_ONLY';
   
   // New dynamic attributes
   pricingModel?: PricingModel;
   pricingCriteria?: PricingCriteria[]; // Keeping for legacy products
   versions?: string[]; // Dynamic list of versions (e.g. ['UltraLight', 'Classic', 'One Page'])
+  
+  // Custom project structure
+  customPhases?: Phase[];
+  maintenanceTriggerTask?: string;
   
   pricingRules: PricingRule[];
 }

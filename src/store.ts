@@ -278,8 +278,23 @@ export const useStore = create<AppState>()(
 
         const initialDate = projectData.installationDate || new Date().toISOString().split('T')[0];
 
-        const processType = projectData.processType || 'STANDARD';
+        const productConfig = get().products.find(p => p.name === projectData.product);
+        const processType = productConfig?.processType || projectData.processType || 'STANDARD';
         let initialContracts: any[] = [];
+
+        let acquisitionPhases = getDefaultPhases("Acquisition");
+        if (productConfig && productConfig.customPhases && productConfig.customPhases.length > 0) {
+          acquisitionPhases = productConfig.customPhases.map(ph => ({
+            ...ph,
+            id: uuidv4(),
+            tasks: ph.tasks.map(t => ({
+              ...t,
+              id: uuidv4(),
+              status: 'PENDING',
+              date: ''
+            }))
+          }));
+        }
 
         const contractAcquisition = {
           id: uuidv4(),
@@ -289,7 +304,7 @@ export const useStore = create<AppState>()(
           status: "ACTIVE" as const,
           startDate: initialDate,
           phase: "Démarchage" as any,
-          phases: getDefaultPhases("Acquisition"),
+          phases: acquisitionPhases,
           tasks: [],
           documents: {}
         };
@@ -343,6 +358,7 @@ export const useStore = create<AppState>()(
           ...projectData,
           id,
           ownerId: ownerId || null,
+          processType,
           status: 'Actif',
           createdAt: new Date().toISOString().split('T')[0],
           contracts: initialContracts,
@@ -672,17 +688,19 @@ export const useStore = create<AppState>()(
         let hasChanges = false;
         const processType = project.processType || 'STANDARD';
         
-        // Trouver la date de la tâche Formation
+        const productConfig = state.products.find(p => p.name === project.product);
+        const triggerTaskName = productConfig?.maintenanceTriggerTask || 'Formation';
+        
+        // Trouver la date de la tâche déclencheur (Formation par défaut)
         const acqContract = updatedContracts.find(c => c.mode === 'Acquisition');
         let formationDoneDate: Date | null = null;
         
         if (acqContract) {
-          const adaptPhase = acqContract.phases.find(ph => ph.name === 'Adaptation');
-          if (adaptPhase) {
-            const formationTask = adaptPhase.tasks.find(t => t.name.includes('Formation'));
-            if ((formationTask && formationTask.status === 'DONE') || adaptPhase.status === 'DONE') {
-              // Si la tâche a une date, l'utiliser, sinon utiliser la date d'aujourd'hui
-              formationDoneDate = (formationTask && formationTask.date) ? new Date(formationTask.date) : new Date();
+          for (const ph of acqContract.phases) {
+            const triggerTask = ph.tasks.find(t => t.name.includes(triggerTaskName));
+            if ((triggerTask && triggerTask.status === 'DONE') || ph.status === 'DONE' && ph.tasks.some(t => t.name.includes(triggerTaskName))) {
+              formationDoneDate = (triggerTask?.date) ? new Date(triggerTask.date) : new Date();
+              break;
             }
           }
         }
@@ -738,11 +756,9 @@ export const useStore = create<AppState>()(
         // --- NOUVELLE LOGIQUE : GÉNÉRATION DES ENCAISSEMENTS ---
         let currentEncaissements = [...(project.encaissements || [])];
         
-        // 1. Gérer l'encaissement d'Acquisition (S'active à la clôture de la phase Adaptation)
+        // 1. Gérer l'encaissement d'Acquisition (S'active à la clôture de l'acquisition / trigger task)
         const acqContractForEnc = updatedContracts.find(c => c.mode === 'Acquisition');
-        if (acqContractForEnc) {
-           const adaptationPhase = acqContractForEnc.phases.find(p => p.name === 'Adaptation');
-           if (adaptationPhase && adaptationPhase.status === 'DONE') {
+        if (acqContractForEnc && formationDoneDate) {
              const existingTotal = currentEncaissements.find(e => e.contractId === acqContractForEnc.id && e.encaissementType === 'TOTAL');
              if (!existingTotal) {
                currentEncaissements.push({
@@ -764,8 +780,7 @@ export const useStore = create<AppState>()(
                });
                hasChanges = true;
              }
-           }
-        }
+             }
 
         // 2. Gérer les maintenances si la formation est terminée
         if (formationDoneDate) {

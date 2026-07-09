@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Plus, Trash2, Save, Settings2, ChevronDown, ChevronUp } from 'lucide-react';
-import { ProductConfig, PricingRule, PricingCriteria } from '../types';
+import { ProductConfig, PricingRule, PricingCriteria, Phase } from '../types';
 import { useStore } from '../store';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -16,6 +16,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
   const [departement, setDepartement] = useState<'D1' | 'D2'>(product?.departement || 'D1');
   const [defaultEntity, setDefaultEntity] = useState<'Naltis' | 'Netsprint' | 'MP'>(product?.defaultEntity || 'Naltis');
   const [maintenancePeriodicity, setMaintenancePeriodicity] = useState<'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle'>(product?.maintenancePeriodicity || 'Annuelle');
+  const [processType, setProcessType] = useState<'STANDARD' | 'DIRECT_MAINTENANCE' | 'MAINTENANCE_ONLY'>(product?.processType || 'STANDARD');
   
   const [pricingCriteria, setPricingCriteria] = useState<PricingCriteria[]>(product?.pricingCriteria || []); // Kept for legacy
   const [pricingModelType, setPricingModelType] = useState<'RANGE' | 'STANDARD'>(product?.pricingModel?.type || 'STANDARD');
@@ -25,7 +26,10 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
   const [versions, setVersions] = useState<string[]>(product?.versions || product?.pricingModel?.versions || ['Standard']);
   const [pricingRules, setPricingRules] = useState<PricingRule[]>(product?.pricingRules || []);
   
-  const [activeTab, setActiveTab] = useState<'GENERAL' | 'VARIABLES' | 'PRICING'>('GENERAL');
+  const [customPhases, setCustomPhases] = useState<Phase[]>(product?.customPhases || []);
+  const [maintenanceTriggerTask, setMaintenanceTriggerTask] = useState<string>(product?.maintenanceTriggerTask || '');
+
+  const [activeTab, setActiveTab] = useState<'GENERAL' | 'VARIABLES' | 'PRICING' | 'PRODUCTION'>('GENERAL');
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
 
   const addVersion = () => setVersions([...versions, 'Nouvelle Version']);
@@ -104,6 +108,63 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
     setPricingRules(pricingRules.filter(r => r.id !== id));
   };
 
+  // Phase & Task Management
+  const addPhase = () => {
+    setCustomPhases([
+      ...customPhases,
+      {
+        id: uuidv4(),
+        name: 'Démarchage',
+        status: 'PENDING',
+        tasks: []
+      }
+    ]);
+  };
+
+  const removePhase = (phaseId: string) => {
+    setCustomPhases(customPhases.filter(p => p.id !== phaseId));
+  };
+
+  const updatePhaseName = (phaseId: string, newName: any) => {
+    setCustomPhases(customPhases.map(p => p.id === phaseId ? { ...p, name: newName } : p));
+  };
+
+  const addTaskToPhase = (phaseId: string) => {
+    setCustomPhases(customPhases.map(p => {
+      if (p.id === phaseId) {
+        return {
+          ...p,
+          tasks: [...p.tasks, { id: uuidv4(), name: 'Nouvelle tâche', date: '', status: 'PENDING' }]
+        };
+      }
+      return p;
+    }));
+  };
+
+  const removeTaskFromPhase = (phaseId: string, taskId: string) => {
+    setCustomPhases(customPhases.map(p => {
+      if (p.id === phaseId) {
+        return {
+          ...p,
+          tasks: p.tasks.filter(t => t.id !== taskId)
+        };
+      }
+      return p;
+    }));
+  };
+
+  const updateTaskName = (phaseId: string, taskId: string, newName: string) => {
+    setCustomPhases(customPhases.map(p => {
+      if (p.id === phaseId) {
+        return {
+          ...p,
+          tasks: p.tasks.map(t => t.id === taskId ? { ...t, name: newName } : t)
+        };
+      }
+      return p;
+    }));
+  };
+
   const handleSave = () => {
     if (!name.trim()) return;
     
@@ -112,6 +173,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
       departement,
       defaultEntity,
       maintenancePeriodicity,
+      processType,
       pricingCriteria, // Kept for legacy compatibility
       pricingModel: {
         id: product?.pricingModel?.id || uuidv4(),
@@ -121,7 +183,9 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
         versions
       },
       versions,
-      pricingRules
+      pricingRules,
+      customPhases,
+      maintenanceTriggerTask
     };
 
     if (product?.id) {
@@ -184,6 +248,16 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
               >
                 Planche Tarifaire
               </button>
+              <button
+                onClick={() => setActiveTab('PRODUCTION')}
+                className={`px-6 py-4 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === 'PRODUCTION' 
+                    ? 'border-fuchsia-600 text-fuchsia-600' 
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Production & Tâches
+              </button>
             </div>
             {activeTab === 'PRICING' && (
               <button
@@ -232,6 +306,14 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                         <option value="Semestrielle">Semestrielle</option>
                         <option value="Trimestrielle">Trimestrielle</option>
                         <option value="Mensuelle">Mensuelle</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-2">Type de Processus</label>
+                      <select value={processType} onChange={(e) => setProcessType(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl p-3.5">
+                        <option value="STANDARD">Standard (Acquisition + Maint. Gratuite + Maint. Annuelle)</option>
+                        <option value="DIRECT_MAINTENANCE">Sans Maintenance Gratuite (Acquisition + Maint. Annuelle)</option>
+                        <option value="MAINTENANCE_ONLY">Maintenance Uniquement</option>
                       </select>
                     </div>
                   </div>
@@ -494,6 +576,115 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                   )}
                 </div>
               )}
+
+              {activeTab === 'PRODUCTION' && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <span className="w-8 h-8 rounded-lg bg-fuchsia-100 text-fuchsia-600 flex items-center justify-center text-sm">4</span>
+                    Configuration de la Production (Contrat Acquisition)
+                  </h3>
+                  <button
+                    onClick={addPhase}
+                    className="flex items-center gap-2 px-4 py-2 bg-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-200 text-sm font-bold rounded-xl transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Ajouter une Phase
+                  </button>
+                </div>
+                
+                <p className="text-sm text-slate-500 mb-6 font-medium">
+                  Définissez ici les phases et les tâches spécifiques à ce produit lors de l'acquisition. 
+                  Si aucune phase n'est configurée, le flux standard (Démarchage, Adaptation, etc.) sera utilisé.
+                </p>
+
+                {customPhases.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                    <p className="text-slate-500 font-medium mb-4">Ce produit utilise les phases par défaut.</p>
+                    <button onClick={addPhase} className="px-4 py-2 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-bold text-slate-700 hover:bg-slate-50">
+                      Personnaliser les phases
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {customPhases.map((phase, pIndex) => (
+                      <div key={phase.id} className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                        <div className="p-4 border-b border-slate-200 bg-white flex justify-between items-center">
+                          <div className="flex items-center gap-4 flex-1">
+                            <span className="w-6 h-6 rounded bg-slate-100 text-slate-500 flex items-center justify-center text-xs font-bold">{pIndex + 1}</span>
+                            <div className="flex-1 max-w-sm">
+                              <select
+                                value={phase.name}
+                                onChange={(e) => updatePhaseName(phase.id, e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold rounded-xl p-2 focus:ring-2 focus:ring-fuchsia-500/20"
+                              >
+                                <option value="Démarchage">Démarchage</option>
+                                <option value="Adaptation">Adaptation</option>
+                                <option value="Encaissement">Encaissement</option>
+                                <option value="Recouvrement">Recouvrement</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => addTaskToPhase(phase.id)} className="text-xs font-bold text-fuchsia-600 hover:text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
+                              <Plus className="w-3 h-3" /> Tâche
+                            </button>
+                            <button onClick={() => removePhase(phase.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          {phase.tasks.length === 0 ? (
+                            <p className="text-xs text-slate-400 font-medium italic text-center py-2">Aucune tâche dans cette phase</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {phase.tasks.map((task, tIndex) => (
+                                <div key={task.id} className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                                  <div className="w-6 text-center text-xs font-bold text-slate-400">{tIndex + 1}.</div>
+                                  <input
+                                    type="text"
+                                    value={task.name}
+                                    onChange={(e) => updateTaskName(phase.id, task.id, e.target.value)}
+                                    placeholder="Nom de la tâche"
+                                    className="flex-1 bg-transparent border-none text-sm font-medium text-slate-700 focus:ring-0 px-2 py-1"
+                                  />
+                                  <button onClick={() => removeTaskFromPhase(phase.id, task.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* Maintenance Trigger Task Selection */}
+                    <div className="mt-8 p-6 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                      <h4 className="text-sm font-bold text-indigo-900 mb-2 flex items-center gap-2">
+                        <Settings2 className="w-4 h-4 text-indigo-600" />
+                        Déclencheur de Maintenance
+                      </h4>
+                      <p className="text-xs font-medium text-indigo-700/70 mb-4">
+                        Sélectionnez la tâche qui, une fois marquée comme terminée (DONE), déclenchera automatiquement le démarrage du contrat de maintenance.
+                      </p>
+                      <select
+                        value={maintenanceTriggerTask}
+                        onChange={(e) => setMaintenanceTriggerTask(e.target.value)}
+                        className="w-full max-w-md bg-white border border-indigo-200 text-slate-900 text-sm font-bold rounded-xl p-3 shadow-sm focus:ring-2 focus:ring-indigo-500/20"
+                      >
+                        <option value="">-- Par défaut (Formation) --</option>
+                        {customPhases.flatMap(p => p.tasks).map(t => (
+                          <option key={t.id} value={t.name}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             </div>
           </div>
         </div>
