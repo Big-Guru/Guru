@@ -45,8 +45,10 @@ export const generateWordDocument = async (
   draft?: DocumentDraft
 ) => {
   try {
-    // 1. Choisir le bon modèle
-    const templateUrl = type === 'PROFORMA' ? '/templates/proforma.docx' : '/templates/facture.docx';
+    // 1. Choisir le bon modèle en fonction de l'entité du projet
+    const entityName = project.entity?.toLowerCase() || 'naltis';
+    const suffix = entityName === 'naltis' ? '' : `_${entityName}`;
+    const templateUrl = type === 'PROFORMA' ? `/templates/proforma${suffix}.docx` : `/templates/facture${suffix}.docx`;
     
     // 2. Charger le fichier .docx binaire
     const content = await loadFile(templateUrl);
@@ -61,8 +63,8 @@ export const generateWordDocument = async (
     // 4. Utiliser les prix du brouillon si disponibles, sinon calculer par défaut
     const encProduct = encaissement.product || project.product;
     const encVersion = encaissement.version || project.version;
-    const prixHT = draft ? draft.totalHT : getPrice(encProduct, encVersion, encaissement.mode, client, project);
-    const designation = getDesignation(encProduct, encVersion, encaissement.mode, client, project);
+    const prixHT = draft ? draft.totalHT : getPrice(encProduct, encVersion, encaissement.mode, client, project, encaissement.pricingParameters);
+    const designation = getDesignation(encProduct, encVersion, encaissement.mode, client, project, encaissement.pricingParameters);
     const tva = draft ? draft.totalTVA : (prixHT * 0.19);
     const prixTTC = draft ? draft.totalTTC : (prixHT + tva);
 

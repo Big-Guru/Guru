@@ -18,7 +18,7 @@ service cloud.firestore {
              data.address is string && data.address.size() <= 500 &&
              data.wilaya is string && data.wilaya.size() <= 100 &&
              data.effectif is number &&
-             data.effectifType in ['UNIVERSITE', 'EH_DA'] &&
+             data.effectifType in ['UNIVERSITE', 'EH_DA', 'PRIVE', 'PUBLIC'] &&
              data.nif is string && data.nif.size() <= 50 &&
              data.nis is string && data.nis.size() <= 50 &&
              data.rc is string && data.rc.size() <= 50 &&
@@ -56,7 +56,7 @@ service cloud.firestore {
              (!data.keys().hasAny(['maintenances']) || (data.maintenances is list && data.maintenances.size() <= 100)) &&
              
              // Optional fields validation
-             (!data.keys().hasAny(['version']) || data.version in ['ULTRALIGHT', 'LIGHT', 'INTERMEDIATE', 'ADVANCED', 'GLOBAL']) &&
+             (!data.keys().hasAny(['version']) || (data.version is string && data.version.size() <= 100)) &&
              (!data.keys().hasAny(['installationDate']) || (data.installationDate is string && data.installationDate.size() <= 50)) &&
              (!data.keys().hasAny(['departement']) || (data.departement is string && data.departement.size() <= 200)) &&
              (!data.keys().hasAny(['wilaya']) || (data.wilaya is string && data.wilaya.size() <= 100)) &&

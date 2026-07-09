@@ -51,10 +51,13 @@ interface AppState {
   projects: Project[];
   missions: Mission[];
   products: ProductConfig[];
+  pricingModels: PricingModel[];
   setClients: (clients: Client[]) => void;
   setProjects: (projects: Project[]) => void;
   setMissions: (missions: Mission[]) => void;
   setProducts: (products: ProductConfig[]) => void;
+  addPricingModel: (model: PricingModel) => void;
+  deletePricingModel: (id: string) => void;
   addProduct: (product: Omit<ProductConfig, 'id'>) => void;
   updateProduct: (id: string, data: Partial<ProductConfig>) => void;
   deleteProduct: (id: string) => void;
@@ -106,11 +109,71 @@ export const useStore = create<AppState>()(
       missions: [],
       dossiersPaiement: [],
       products: [],
+      pricingModels: [],
       setClients: (clients) => set({ clients }),
       setProjects: (projects) => set({ projects }),
       setMissions: (missions) => set({ missions }),
       setDossiersPaiement: (dossiersPaiement) => set({ dossiersPaiement }),
-      setProducts: (products) => set({ products }),
+      addPricingModel: (model) => set((state) => {
+        const models = state.pricingModels || [];
+        const existingIndex = models.findIndex(m => m.name.toLowerCase() === model.name.toLowerCase());
+        if (existingIndex >= 0) {
+          const newModels = [...models];
+          newModels[existingIndex] = { ...model, id: models[existingIndex].id };
+          return { pricingModels: newModels };
+        }
+        return { pricingModels: [...models, model] };
+      }),
+      deletePricingModel: (id) => set((state) => ({ pricingModels: (state.pricingModels || []).filter(m => m.id !== id) })),
+      setProducts: (products) => {
+        // Migration logic for old products to dynamic criteria
+        const migratedProducts = products.map(prod => {
+          let updatedProd = { ...prod };
+          
+          // If no pricingCriteria, it's an old product. Let's add the default ones (Effectif)
+          if (!updatedProd.pricingCriteria || updatedProd.pricingCriteria.length === 0) {
+            updatedProd.pricingCriteria = [
+              {
+                id: 'effectifType',
+                label: 'Type d\'effectif',
+                type: 'SELECT',
+                options: ['UNIVERSITE', 'EH_DA']
+              },
+              {
+                id: 'effectif',
+                label: 'Taille de l\'effectif',
+                type: 'NUMBER_RANGE'
+              }
+            ];
+          }
+
+          // Ensure versions array exists
+          if (!updatedProd.versions || updatedProd.versions.length === 0) {
+            const uniqueVersions = new Set<string>();
+            updatedProd.pricingRules.forEach(r => { if (r.version) uniqueVersions.add(r.version); });
+            updatedProd.versions = Array.from(uniqueVersions);
+          }
+
+          // Migrate rules to use `conditions` instead of hardcoded effectif fields
+          updatedProd.pricingRules = updatedProd.pricingRules.map(rule => {
+            if (!rule.conditions) {
+              const conditions: Record<string, any> = {};
+              if (rule.effectifType) conditions.effectifType = rule.effectifType;
+              if (rule.effectifMin !== undefined || rule.effectifMax !== undefined) {
+                conditions.effectif = {};
+                if (rule.effectifMin !== undefined) conditions.effectif.min = rule.effectifMin;
+                if (rule.effectifMax !== undefined) conditions.effectif.max = rule.effectifMax;
+              }
+              return { ...rule, conditions };
+            }
+            return rule;
+          });
+
+          return updatedProd;
+        });
+        
+        set({ products: migratedProducts });
+      },
       addProduct: async (productData) => {
         const id = uuidv4();
         const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');

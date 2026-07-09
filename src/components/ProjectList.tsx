@@ -41,6 +41,7 @@ export default function ProjectList() {
     mode: 'Acquisition' as 'Acquisition' | 'Maintenance offerte' | 'Maintenance',
     phase: 'Démarchage' as 'Démarchage' | 'Adaptation' | 'Encaissement' | 'Recouvrement',
     status: 'Actif' as 'Actif' | 'Effectué' | 'Suspendu' | 'Abandonné',
+    version: 'Standard',
     createdAt: new Date().toISOString().split('T')[0],
     maintenancePeriodicity: 'Annuelle' as 'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle'
   });
@@ -62,6 +63,7 @@ export default function ProjectList() {
       mode: newProjectData.mode,
       phase: newProjectData.phase,
       status: newProjectData.status,
+      version: newProjectData.version,
       createdAt: newProjectData.createdAt,
       installationDate: newProjectData.createdAt,
       maintenancePeriodicity: newProjectData.maintenancePeriodicity,
@@ -80,6 +82,7 @@ export default function ProjectList() {
       mode: 'Acquisition',
       phase: 'Démarchage',
       status: 'Actif',
+      version: 'Standard',
       createdAt: new Date().toISOString().split('T')[0],
       maintenancePeriodicity: 'Annuelle'
     });
@@ -181,13 +184,14 @@ export default function ProjectList() {
                 mode: 'Acquisition',
                 phase: 'Démarchage',
                 status: 'Actif',
+                version: (firstProd.versions && firstProd.versions.length > 0) ? firstProd.versions[0] : 'Standard',
                 createdAt: new Date().toISOString().split('T')[0],
                 maintenancePeriodicity: firstProd.maintenancePeriodicity as any
               });
             } else {
               setNewProjectData({
                 clientId: '', name: '', departement: 'D1', product: 'PAYE', wilaya: '', ville: '',
-                entity: 'Naltis', technique: [], mode: 'Acquisition', phase: 'Démarchage', status: 'Actif',
+                entity: 'Naltis', technique: [], mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', version: 'Standard',
                 createdAt: new Date().toISOString().split('T')[0], maintenancePeriodicity: 'Annuelle'
               });
             }
@@ -282,10 +286,11 @@ export default function ProjectList() {
                         product: prodName,
                         departement: prodConfig.departement,
                         entity: prodConfig.defaultEntity,
-                        maintenancePeriodicity: prodConfig.maintenancePeriodicity
+                        maintenancePeriodicity: prodConfig.maintenancePeriodicity,
+                        version: (prodConfig.versions && prodConfig.versions.length > 0) ? prodConfig.versions[0] : 'Standard'
                       });
                     } else {
-                      setNewProjectData({ ...newProjectData, product: prodName });
+                      setNewProjectData({ ...newProjectData, product: prodName, version: 'Standard' });
                     }
                   }}
                 >
@@ -293,6 +298,24 @@ export default function ProjectList() {
                   {products.map(p => (
                     <option key={p.id} value={p.name}>{p.name}</option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Version</label>
+                <select
+                  required
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-slate-800"
+                  value={newProjectData.version}
+                  onChange={e => setNewProjectData({ ...newProjectData, version: e.target.value })}
+                >
+                  {(() => {
+                    const selectedProd = products.find(p => p.name === newProjectData.product);
+                    const displayVersions = (selectedProd?.versions && selectedProd.versions.length > 0) ? selectedProd.versions : ['Standard'];
+                    return displayVersions.map(v => (
+                      <option key={v} value={v}>{v}</option>
+                    ));
+                  })()}
                 </select>
               </div>
 

@@ -373,7 +373,7 @@ export default function FacturationList() {
                   : "text-slate-500 hover:text-slate-700"
               )}
             >
-              {ent === 'ALL' ? 'Toutes les entités' : ent === 'MP' ? 'Micro-Planet' : ent}
+              {ent === 'ALL' ? 'Toutes les entités' : ent === 'MP' ? 'Micro Planete' : ent}
             </button>
           ))}
         </div>

@@ -846,10 +846,11 @@ export default function ClientDetails() {
                           product: prodName as any,
                           departement: prodConfig.departement,
                           entity: prodConfig.defaultEntity,
-                          maintenancePeriodicity: prodConfig.maintenancePeriodicity
+                          maintenancePeriodicity: prodConfig.maintenancePeriodicity,
+                          version: (prodConfig.versions && prodConfig.versions.length > 0) ? prodConfig.versions[0] : 'Standard'
                         });
                       } else {
-                        setNewProjectData({ ...newProjectData, product: prodName as any });
+                        setNewProjectData({ ...newProjectData, product: prodName as any, version: 'Standard' });
                       }
                     }}
                   >
@@ -868,11 +869,13 @@ export default function ClientDetails() {
                     value={newProjectData.version}
                     onChange={e => setNewProjectData({ ...newProjectData, version: e.target.value as ProductVersion })}
                   >
-                    <option value="ULTRALIGHT">UltraLight</option>
-                    <option value="LIGHT">Light</option>
-                    <option value="INTERMEDIATE">Intermediate</option>
-                    <option value="ADVANCED">Advanced</option>
-                    <option value="GLOBAL">Global</option>
+                    {(() => {
+                      const selectedProd = products.find(p => p.name === newProjectData.product);
+                      const displayVersions = (selectedProd?.versions && selectedProd.versions.length > 0) ? selectedProd.versions : ['Standard'];
+                      return displayVersions.map(v => (
+                        <option key={v} value={v}>{v}</option>
+                      ));
+                    })()}
                   </select>
                 </div>
 

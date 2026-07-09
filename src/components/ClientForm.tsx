@@ -29,7 +29,7 @@ export default function ClientForm() {
     address: '',
     wilaya: '',
     effectif: 0,
-    effectifType: 'UNIVERSITE' as 'UNIVERSITE' | 'EH_DA',
+    effectifType: 'PRIVE' as any,
     nif: '',
     nis: '',
     rc: '',
@@ -45,7 +45,7 @@ export default function ClientForm() {
           address: client.address || '',
           wilaya: client.wilaya || '',
           effectif: client.effectif || 0,
-          effectifType: client.effectifType || 'UNIVERSITE',
+          effectifType: (client.effectifType as 'UNIVERSITE' | 'EH_DA' | 'PUBLIC' | 'PRIVE') || 'UNIVERSITE',
           nif: client.nif || '',
           nis: client.nis || '',
           rc: client.rc || '',
@@ -132,15 +132,21 @@ export default function ClientForm() {
                 />
              </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Type</label>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">Type d'établissement</label>
                 <select
                   required
-                  className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 block p-3.5 transition-all outline-none"
+                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                   value={formData.effectifType}
                   onChange={e => setFormData({ ...formData, effectifType: e.target.value as any })}
                 >
-                  <option value="UNIVERSITE">Université</option>
-                  <option value="EH_DA">EH/DA</option>
+                  <optgroup label="Type Standard">
+                    <option value="PRIVE">Privé</option>
+                    <option value="PUBLIC">Public</option>
+                  </optgroup>
+                  <optgroup label="Par Plage Numérique">
+                    <option value="UNIVERSITE">Université</option>
+                    <option value="EH_DA">EH/DA</option>
+                  </optgroup>
                 </select>
               </div>
           </div>

@@ -459,13 +459,16 @@ export default function ProjectDetails() {
 
   return (
     <div className="animate-fade-in pb-12 w-full max-w-7xl mx-auto flex flex-col gap-8">
+      <div className="w-full">
+        <Link to={fromClientId ? `/clients/${fromClientId}` : "/projects"} className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
+          <ArrowLeft className="w-4 h-4" />
+          {fromClientId ? "Retour au profil client" : "Retour à la liste des projets"}
+        </Link>
+      </div>
+
       <div className="flex flex-col xl:flex-row gap-6 items-stretch w-full">
         {/* LEFT PANEL */}
         <div className="flex-1 w-full space-y-6 min-w-0">
-          <Link to={fromClientId ? `/clients/${fromClientId}` : "/projects"} className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-extrabold text-slate-500 hover:text-blue-600 shadow-sm transition-all w-max">
-            <ArrowLeft className="w-4 h-4" />
-            {fromClientId ? "Retour au profil client" : "Retour à la liste des projets"}
-          </Link>
           {/* 1. Header Banner */}
           <div className="relative overflow-hidden bg-white rounded-[2rem] p-6 lg:p-8 border border-slate-200/60 shadow-sm flex flex-col gap-4 group">
             <div className="absolute -right-20 -top-20 w-64 h-64 bg-blue-50 rounded-full blur-3xl group-hover:bg-blue-100/60 transition-colors z-0"></div>
@@ -762,8 +765,10 @@ export default function ProjectDetails() {
                   }
 
                   return (
-                    <button
+                    <div
                       key={card.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         setSelectedContractId(card.id);
                         setShowContractManager(true);
@@ -890,7 +895,7 @@ export default function ProjectDetails() {
                           </div>
                         </div>
                       </div>
-                    </button>
+                    </div>
                   );
                 };
 
@@ -1543,24 +1548,41 @@ export default function ProjectDetails() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Produit</label>
-                  <select value={editData.product} onChange={e => setEditData({ ...editData, product: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
-                    <option value="PAYE">Paye</option>
-                    <option value="BUDGET">Budget</option>
-                    <option value="BUDGET_APC">Budget APC</option>
-                    <option value="STOCKS">Stocks</option>
-                    <option value="GRH">GRH</option>
-                    <option value="PHARMATIS">Pharmatis</option>
-                    <option value="GBS">GBS</option>
+                  <select 
+                    value={editData.product} 
+                    onChange={e => {
+                      const prodName = e.target.value;
+                      const prodConfig = products.find(p => p.name === prodName);
+                      if (prodConfig) {
+                        setEditData({
+                          ...editData,
+                          product: prodName as any,
+                          departement: prodConfig.departement,
+                          entity: prodConfig.defaultEntity,
+                          version: (prodConfig.versions && prodConfig.versions.length > 0) ? prodConfig.versions[0] : 'Standard'
+                        });
+                      } else {
+                        setEditData({ ...editData, product: prodName as any, version: 'Standard' });
+                      }
+                    }} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none"
+                  >
+                    {products.length === 0 && <option value="PAYE">Aucun produit trouvé</option>}
+                    {products.map(p => (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Version</label>
                   <select value={editData.version} onChange={e => setEditData({ ...editData, version: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
-                    <option value="ULTRALIGHT">UltraLight</option>
-                    <option value="LIGHT">Light</option>
-                    <option value="INTERMEDIATE">Intermediate</option>
-                    <option value="ADVANCED">Advanced</option>
-                    <option value="GLOBAL">Global</option>
+                    {(() => {
+                      const selectedProd = products.find(p => p.name === editData.product);
+                      const displayVersions = (selectedProd?.versions && selectedProd.versions.length > 0) ? selectedProd.versions : ['Standard'];
+                      return displayVersions.map(v => (
+                        <option key={v} value={v}>{v}</option>
+                      ));
+                    })()}
                   </select>
                 </div>
                 <div>
@@ -1568,7 +1590,7 @@ export default function ProjectDetails() {
                   <select value={editData.entity} onChange={e => setEditData({ ...editData, entity: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-500 outline-none">
                     <option value="Naltis">Naltis</option>
                     <option value="Netsprint">Netsprint</option>
-                    <option value="MP">Micro-Planete</option>
+                    <option value="MP">Micro Planete</option>
                   </select>
                 </div>
                 <div>

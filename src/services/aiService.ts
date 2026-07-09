@@ -5,9 +5,13 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAi() {
   if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("Clé API Gemini manquante. Veuillez configurer GEMINI_API_KEY.");
+    // Si la variable d'environnement n'est pas définie, vous pouvez coller votre clé ici
+    const HARDCODED_API_KEY = "AIzaSyCLzbEvRxkzPkZjz5GBXoWeUPgZ3dlxlkw";
+
+    const apiKey = process.env.GEMINI_API_KEY || HARDCODED_API_KEY;
+
+    if (!apiKey || apiKey.includes("VOTRE_CLE_API_ICI")) {
+      throw new Error("Clé API Gemini manquante. Veuillez configurer GEMINI_API_KEY ou remplacer VOTRE_CLE_API_ICI dans aiService.ts.");
     }
     aiInstance = new GoogleGenAI({ apiKey });
   }
@@ -35,7 +39,7 @@ Règles strictes :
 
   try {
     const response = await getAi().models.generateContent({
-      model: "gemini-2.5-pro",
+      model: "gemini-2.0-flash",
       contents: promptStr,
       config: {
         responseMimeType: "application/json",
@@ -84,7 +88,7 @@ Règles strictes :
 
     const text = response.text;
     if (!text) return [];
-    
+
     const data = JSON.parse(text);
     return data as ItineraryDay[];
   } catch (error) {

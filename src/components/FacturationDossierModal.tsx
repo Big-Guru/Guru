@@ -518,7 +518,7 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                
                // For independent encaissements, we default to Acquisition base price for percentage calculations
                const priceMode = (e.mode === 'Acquisition' || e.mode === 'Maintenance') ? e.mode : 'Acquisition';
-               const basePrice = getPrice(prod, vers, priceMode, client, p);
+               const basePrice = getPrice(prod, vers, priceMode, client, p, e.pricingParameters);
                let price = basePrice;
                
                if (e.encaissementType === 'AVANCE') {

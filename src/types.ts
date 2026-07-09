@@ -79,6 +79,9 @@ export interface EncaissementRecord {
   encaissementCetteAnnee?: 'Probable' | 'Peu probable' | 'Effectué';
   observation?: string;
   emetteur?: string;
+
+  // New Dynamic Pricing Parameters
+  pricingParameters?: Record<string, any>; // e.g. { effectif: 45, type: 'UNIVERSITE', secteur: 'Public' }
 }
 
 export interface DossierPaiement {
@@ -105,27 +108,53 @@ export interface Client {
   address: string;
   wilaya: string;
   effectif: number;
-  effectifType: 'UNIVERSITE' | 'EH_DA';
+  effectifType?: 'UNIVERSITE' | 'EH_DA' | 'PUBLIC' | 'PRIVE';
   nif: string;
   nis: string;
   rc: string; // Registre commerce or Agrément
   ai: string; // Article d'imposition
 }
 
-export type ProductType = 'PAYE' | 'BUDGET' | 'BUDGET_APC' | 'STOCKS' | 'GRH' | 'PHARMATIS' | 'GBS';
-export type ProductVersion = 'ULTRALIGHT' | 'LIGHT' | 'INTERMEDIATE' | 'ADVANCED' | 'GLOBAL';
+export type ProductType = 'PAYE' | 'BUDGET' | 'BUDGET_APC' | 'STOCKS' | 'GRH' | 'PHARMATIS' | 'GBS' | string;
+export type ProductVersion = 'ULTRALIGHT' | 'LIGHT' | 'INTERMEDIATE' | 'ADVANCED' | 'GLOBAL' | string;
 export type ProcessType = 'STANDARD' | 'DIRECT_MAINTENANCE' | 'MAINTENANCE_ONLY';
+
+export type CriteriaType = 'SELECT' | 'NUMBER_RANGE' | 'BOOLEAN';
+
+export interface PricingCriteria {
+  id: string; // e.g. 'effectifType', 'secteur', 'hosting'
+  label: string; // e.g. 'Type d\'effectif', 'Secteur d\'activité'
+  type: CriteriaType;
+  options?: string[]; // Used for SELECT type
+}
 
 export interface PricingRule {
   id: string;
   entity: 'Naltis' | 'Netsprint' | 'MP';
-  effectifMin: number;
-  effectifMax: number;
-  effectifType: 'UNIVERSITE' | 'EH_DA';
-  version: ProductVersion;
-  designation?: string;
+  
+  version: ProductVersion; // Kept for backward compatibility, though versions can be dynamic now
+  designation?: string; // Acquisition designation
+  maintenanceDesignation?: string; // Maintenance designation
   acquisitionPrice: number;
   maintenancePrice: number;
+  
+  // New dynamic condition system
+  conditions?: Record<string, any>; 
+  // Example for Paye: { effectif: { min: 0, max: 50 }, effectifType: 'UNIVERSITE' }
+  // Example for SiteWeb: { secteur: 'Public', hosting: true }
+  
+  // Legacy fields (kept for backward compatibility during migration)
+  effectifMin?: number;
+  effectifMax?: number;
+  effectifType?: 'UNIVERSITE' | 'EH_DA' | string;
+}
+
+export interface PricingModel {
+  id: string;
+  name: string;
+  type: 'RANGE' | 'STANDARD';
+  option: 'UNIVERSITE' | 'EH_DA' | 'PUBLIC' | 'PRIVE';
+  versions: string[];
 }
 
 export interface ProductConfig {
@@ -135,6 +164,12 @@ export interface ProductConfig {
   departement: 'D1' | 'D2';
   defaultEntity: 'Naltis' | 'Netsprint' | 'MP';
   maintenancePeriodicity: 'Mensuelle' | 'Trimestrielle' | 'Semestrielle' | 'Annuelle';
+  
+  // New dynamic attributes
+  pricingModel?: PricingModel;
+  pricingCriteria?: PricingCriteria[]; // Keeping for legacy products
+  versions?: string[]; // Dynamic list of versions (e.g. ['UltraLight', 'Classic', 'One Page'])
+  
   pricingRules: PricingRule[];
 }
 
