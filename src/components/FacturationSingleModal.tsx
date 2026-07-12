@@ -82,7 +82,7 @@ export default function FacturationSingleModal({ projectId, projectName, product
                       <button 
                         onClick={() => {
                           if (window.confirm("Voulez-vous vraiment réinitialiser cette proforma ?")) {
-                            updateEncaissement(projectId, enc.id, { proforma: { status: 'PENDING', draft: undefined } });
+                            updateEncaissement(projectId, enc.id, { proforma: { status: 'PENDING', draft: null as any } });
                           }
                         }}
                         className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
@@ -142,7 +142,7 @@ export default function FacturationSingleModal({ projectId, projectName, product
                       <button 
                         onClick={() => {
                           if (window.confirm("Voulez-vous vraiment réinitialiser cette facture ?")) {
-                            updateEncaissement(projectId, enc.id, { facture: { status: 'PENDING', draft: undefined } });
+                            updateEncaissement(projectId, enc.id, { facture: { status: 'PENDING', draft: null as any } });
                           }
                         }}
                         className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"

@@ -157,6 +157,13 @@ export interface PricingModel {
   versions: string[];
 }
 
+export interface PricingBoard {
+  id: string;
+  ownerId?: string;
+  name: string;
+  rules: PricingRule[];
+}
+
 export interface ProductConfig {
   id: string;
   ownerId?: string;
@@ -203,10 +210,18 @@ export type CardStatus = 'ACTIVE' | 'DONE' | 'SUSPENDED' | 'ABANDONED' | 'PENDIN
 
 export interface Phase {
   id: string;
-  name: CardPhase;
-  status: CardStatus;
-  startDate?: string;
+  name: string;
   tasks: ProjectTask[];
+  status?: 'PENDING' | 'ACTIVE' | 'DONE';
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface ProductionModel {
+  id: string;
+  name: string;
+  phases: Phase[];
+  ownerId?: string;
 }
 
 export interface Contract {

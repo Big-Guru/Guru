@@ -181,7 +181,7 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                           <button 
                             onClick={() => {
                               if (window.confirm("Voulez-vous vraiment réinitialiser cette proforma ?")) {
-                                updateEncaissement(enc.projectId, enc.id, { proforma: { status: 'PENDING', draft: undefined } });
+                                updateEncaissement(enc.projectId, enc.id, { proforma: { status: 'PENDING', draft: null as any } });
                               }
                             }}
                             className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
@@ -340,7 +340,7 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                           <button 
                             onClick={() => {
                               if (window.confirm("Voulez-vous vraiment réinitialiser cette facture ?")) {
-                                updateEncaissement(enc.projectId, enc.id, { facture: { status: 'PENDING', draft: undefined } });
+                                updateEncaissement(enc.projectId, enc.id, { facture: { status: 'PENDING', draft: null as any } });
                               }
                             }}
                             className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
@@ -547,13 +547,6 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                totalHT += price;
                
                const customDesignation = getDesignation(prod, vers, priceMode, client, p);
-               const versionStr = vers ? `, Version ${vers}` : '';
-               const title = `Logiciel ${prod}${versionStr}`;
-               let subtitle = '';
-               if (e.mode === 'Acquisition') subtitle = 'Acquisition';
-               else if (e.mode === 'Maintenance') subtitle = `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
-               else if (e.mode === 'Indépendant') subtitle = e.title || 'Encaissement Indépendant';
-               
                let description = '';
                
                if (customDesignation) {
@@ -568,29 +561,30 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                      }
                   }
                } else {
-                  // Fallback to old default generated text
-                  if (e.encaissementType === 'AVANCE') {
-                     description = `${title}\n${subtitle} - Avance (${e.percentage || 30}%)`;
-                  } else if (e.encaissementType === 'TOTAL') {
-                     const paidAvances = e.contractId ? (p.encaissements || []).filter(other => other.contractId === e.contractId && other.encaissementType === 'AVANCE' && other.status === 'DONE') : [];
-                     if (paidAvances.length > 0) {
-                        description = `${title}\n${subtitle} - Solde (Déduction des avances)`;
-                     } else {
-                        description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle\n• Télé-intervention annuelle`.trim();
-                     }
-                  } else {
-                     description = `${title}\n${subtitle}`;
+                  const prodConfig = useStore.getState().products.find(p => p.name.toLowerCase() === prod.toLowerCase());
+                  let debugInfo = `Désignation non configurée.\nRecherche: Produit='${prod}', Version='${vers}', Entité='${p.entity}'\n`;
+                  if (prodConfig && prodConfig.pricingRules) {
+                     debugInfo += `${prodConfig.pricingRules.length} règles trouvées:\n`;
+                     prodConfig.pricingRules.forEach((r, i) => {
+                        debugInfo += `- Règle ${i+1} (Vers='${r.version}', Ent='${r.entity}'): `;
+                        if (r.version !== vers) debugInfo += `Version '${r.version}' != '${vers}'. `;
+                        if (r.entity !== p.entity) debugInfo += `Entité '${r.entity}' != '${p.entity}'. `;
+                        if (r.conditions && Object.keys(r.conditions).length > 0) debugInfo += `Conditions dynamiques présentes. `;
+                        if (r.effectifType !== undefined) debugInfo += `effectifType '${r.effectifType}'. `;
+                     });
                   }
+                  description = debugInfo;
                }
 
                if (basePrice === 0) {
                   const prodConfig = useStore.getState().products.find(p => p.name.toLowerCase() === prod.toLowerCase());
-                  description += `\n\n[ERREUR PRIX: 0 DA] Vérifiez la Règle Tarifaire.\nProduit cherché: '${prod}' (Version: '${vers}').\nEntité projet: '${p.entity}'.\nClient: Effectif=${client.effectif}, Type=${client.effectifType}.`;
+                  let warnMsg = `[ERREUR PRIX: 0 DA] Vérifiez la Règle Tarifaire.\nProduit cherché: '${prod}' (Version: '${vers}').\nEntité projet: '${p.entity}'.\nClient: Effectif=${client.effectif}, Type=${client.effectifType}.`;
                   if (prodConfig) {
-                    description += `\nRègles trouvées pour ce produit : ${prodConfig.pricingRules.length}\nVeuillez vérifier qu'une des règles correspond EXACTEMENT à ces critères.`;
+                    warnMsg += `\nRègles trouvées pour ce produit : ${prodConfig.pricingRules.length}\nVeuillez vérifier qu'une des règles correspond EXACTEMENT à ces critères.`;
                   } else {
-                    description += `\nLe produit '${prod}' n'a pas été trouvé dans la liste des produits dynamiques.`;
+                    warnMsg += `\nLe produit '${prod}' n'a pas été trouvé dans la liste des produits dynamiques.`;
                   }
+                  console.warn(warnMsg);
                }
                
                items.push({
@@ -599,7 +593,8 @@ export default function FacturationDossierModal({ dossierId, client, encaissemen
                });
             });
 
-            const totalTVA = totalHT * 0.19;
+            const tvaRate = targetProject.entity?.toLowerCase() === 'netsprint' ? 0 : 0.19;
+            const totalTVA = totalHT * tvaRate;
             const totalTTC = totalHT + totalTVA;
 
             draft = {

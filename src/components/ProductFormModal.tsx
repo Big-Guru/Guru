@@ -10,7 +10,7 @@ interface ProductFormModalProps {
 }
 
 export default function ProductFormModal({ product, onClose }: ProductFormModalProps) {
-  const { addProduct, updateProduct, pricingModels, addPricingModel } = useStore();
+  const { addProduct, updateProduct, pricingModels, addPricingModel, productionModels, addProductionModel, deleteProductionModel, pricingBoards, addPricingBoard } = useStore();
   
   const [name, setName] = useState(product?.name || '');
   const [departement, setDepartement] = useState<'D1' | 'D2'>(product?.departement || 'D1');
@@ -23,6 +23,9 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
   const [pricingModelOption, setPricingModelOption] = useState<'UNIVERSITE' | 'EH_DA' | 'PUBLIC' | 'PRIVE'>(product?.pricingModel?.option || 'PRIVE');
   const [pricingModelName, setPricingModelName] = useState(product?.pricingModel?.name || '');
   
+  const [selectedProductionModelId, setSelectedProductionModelId] = useState<string>('');
+  const [selectedPricingBoardId, setSelectedPricingBoardId] = useState<string>('');
+  
   const [versions, setVersions] = useState<string[]>(product?.versions || product?.pricingModel?.versions || ['Standard']);
   const [pricingRules, setPricingRules] = useState<PricingRule[]>(product?.pricingRules || []);
   
@@ -30,6 +33,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
   const [maintenanceTriggerTask, setMaintenanceTriggerTask] = useState<string>(product?.maintenanceTriggerTask || '');
 
   const [activeTab, setActiveTab] = useState<'GENERAL' | 'VARIABLES' | 'PRICING' | 'PRODUCTION'>('GENERAL');
+  const [activeEntityTab, setActiveEntityTab] = useState<'Naltis' | 'Netsprint' | 'MP'>('Naltis');
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
 
   const addVersion = () => setVersions([...versions, 'Nouvelle Version']);
@@ -56,6 +60,39 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
     alert(isUpdate ? "Modèle mis à jour avec succès !" : "Modèle enregistré avec succès !");
   };
 
+  const saveProductionModel = () => {
+    const modelName = window.prompt("Entrez le nom du modèle de production à sauvegarder :");
+    if (!modelName || !modelName.trim()) return;
+
+    addProductionModel({
+      name: modelName.trim(),
+      phases: customPhases
+    });
+    alert("Modèle de production enregistré avec succès !");
+  };
+
+  const loadProductionModel = (modelId: string) => {
+    if (!modelId) return;
+    const model = productionModels.find(m => m.id === modelId);
+    if (model) {
+      if (customPhases.length > 0) {
+        if (!window.confirm("Attention, le chargement de ce modèle va écraser vos phases actuelles. Continuer ?")) {
+          setSelectedProductionModelId('');
+          return;
+        }
+      }
+      // Clone the phases to ensure new UUIDs for everything so it doesn't conflict
+      const newPhases = model.phases.map(p => ({
+        ...p,
+        id: uuidv4(),
+        tasks: p.tasks.map(t => ({ ...t, id: uuidv4() }))
+      }));
+      setCustomPhases(newPhases);
+      setSelectedProductionModelId('');
+      alert(`Modèle "${model.name}" chargé avec succès !`);
+    }
+  };
+
   const loadPricingModel = (modelId: string) => {
     const model = pricingModels.find(m => m.id === modelId);
     if (model) {
@@ -66,6 +103,68 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
     }
   };
 
+  const savePricingBoard = () => {
+    const rulesToSave = pricingRules.filter(r => r.entity === activeEntityTab);
+    if (rulesToSave.length === 0) {
+      alert(`Il n'y a aucune règle pour ${activeEntityTab} à sauvegarder.`);
+      return;
+    }
+
+    const boardName = window.prompt(`Entrez le nom de la planche tarifaire pour ${activeEntityTab} :`);
+    if (!boardName || !boardName.trim()) return;
+
+    addPricingBoard({
+      name: boardName.trim(),
+      rules: rulesToSave
+    });
+    alert(`Planche tarifaire enregistrée avec succès !`);
+  };
+
+  const loadPricingBoard = (boardId: string) => {
+    if (!boardId) return;
+    const board = pricingBoards?.find(b => b.id === boardId);
+    if (board) {
+      const mode = window.confirm(`Voulez-vous REMPLACER vos règles ${activeEntityTab} par ce modèle ?\\n\\n[OK] = Remplacer\\n[Annuler] = Ajouter à la suite`);
+      
+      const newRules = board.rules.map(r => ({
+        ...r,
+        id: uuidv4(),
+        entity: activeEntityTab // Force the entity to the active tab
+      }));
+
+      if (mode) {
+        // Remove existing rules for this entity and add the new ones
+        setPricingRules([
+          ...pricingRules.filter(r => r.entity !== activeEntityTab),
+          ...newRules
+        ]);
+      } else {
+        // Just append the new ones
+        setPricingRules([...pricingRules, ...newRules]);
+      }
+      setSelectedPricingBoardId('');
+      alert(`Planche "${board.name}" chargée dans l'onglet ${activeEntityTab} avec succès !`);
+    }
+  };
+
+  const cloneFromEntity = (sourceEntity: 'Naltis' | 'Netsprint' | 'MP') => {
+    const sourceRules = pricingRules.filter(r => r.entity === sourceEntity);
+    if (sourceRules.length === 0) {
+      alert(`Il n'y a aucune règle dans l'onglet ${sourceEntity} à cloner.`);
+      return;
+    }
+
+    if (window.confirm(`Voulez-vous cloner les ${sourceRules.length} règles de ${sourceEntity} vers ${activeEntityTab} ?`)) {
+      const clonedRules = sourceRules.map(r => ({
+        ...r,
+        id: uuidv4(),
+        entity: activeEntityTab
+      }));
+      setPricingRules([...pricingRules, ...clonedRules]);
+      alert(`Règles clonées avec succès !`);
+    }
+  };
+
   // Pricing Rule Management
   const handleAddRule = () => {
     const newId = uuidv4();
@@ -73,7 +172,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
       ...pricingRules,
       {
         id: newId,
-        entity: defaultEntity,
+        entity: activeEntityTab,
         version: versions[0] || 'Standard',
         conditions: {},
         acquisitionPrice: 0,
@@ -426,25 +525,90 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                       )}
                     </div>
                   </div>
+
+
                 </div>
               )}
 
               {activeTab === 'PRICING' && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  
+                  {/* Entity Sub-tabs */}
+                  <div className="flex bg-slate-100 p-1 rounded-xl mb-6 self-start w-fit">
+                    {(['Naltis', 'Netsprint', 'MP'] as const).map(entity => (
+                      <button
+                        key={entity}
+                        onClick={() => setActiveEntityTab(entity)}
+                        className={`px-6 py-2 text-sm font-bold rounded-lg transition-all ${
+                          activeEntityTab === entity
+                            ? 'bg-white text-indigo-600 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                        }`}
+                      >
+                        {entity}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Load Pricing Board */}
+                  <div className="mb-6 p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-center justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-indigo-900 mb-1">Modèles de Planches Tarifaires</h4>
+                      <p className="text-xs font-medium text-indigo-700/70">Chargez un modèle pré-enregistré dans l'onglet actuel ({activeEntityTab}).</p>
+                    </div>
+                    <div className="flex-1 max-w-sm flex gap-2">
+                      <select
+                        value={selectedPricingBoardId}
+                        onChange={(e) => setSelectedPricingBoardId(e.target.value)}
+                        className="flex-1 bg-white border border-indigo-200 text-slate-900 text-sm font-bold rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={!pricingBoards || pricingBoards.length === 0}
+                      >
+                        <option value="">
+                          {(!pricingBoards || pricingBoards.length === 0) ? "Aucun modèle enregistré" : "Sélectionner un modèle..."}
+                        </option>
+                        {pricingBoards && pricingBoards.map(b => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.rules.length} règles)</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => loadPricingBoard(selectedPricingBoardId)}
+                        disabled={!selectedPricingBoardId}
+                        className="px-4 py-2 bg-indigo-600 text-white font-bold text-sm rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shrink-0"
+                      >
+                        Charger
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Clone Shortcut */}
+                  <div className="mb-6 flex gap-2">
+                    {['Naltis', 'Netsprint', 'MP'].filter(e => e !== activeEntityTab).map(source => (
+                      <button
+                        key={`clone-${source}`}
+                        onClick={() => cloneFromEntity(source as any)}
+                        disabled={pricingRules.filter(r => r.entity === source).length === 0}
+                        className="text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Cloner depuis {source}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                       <span className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">3</span>
-                      Règles Tarifaires Dynamiques
+                      Règles Tarifaires : {activeEntityTab}
                     </h3>
                   </div>
 
-                  {pricingRules.length === 0 ? (
+                  {pricingRules.filter(r => r.entity === activeEntityTab).length === 0 ? (
                     <div className="text-center py-12 bg-slate-50 border border-slate-200/60 border-dashed rounded-3xl">
-                      <p className="text-slate-500 font-medium">Aucune règle définie. Ajoutez-en une avec le bouton en haut à droite.</p>
+                      <p className="text-slate-500 font-medium">Aucune règle définie pour {activeEntityTab}. Ajoutez-en une avec le bouton en haut à droite.</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {pricingRules.map((rule, index) => {
+                      {pricingRules.filter(r => r.entity === activeEntityTab).map((rule, index) => {
                         const ruleConditions = rule.conditions || {};
                         const isExpanded = expandedRuleId === rule.id;
                         
@@ -495,8 +659,8 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Entité</label>
                                   <select value={rule.entity} onChange={e => updateRule(rule.id, { entity: e.target.value as any })} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500/20">
                                     <option value="Naltis">Naltis</option>
-                                    <option value="Netsprint">NetSprint</option>
-                                    <option value="MP">Micro Planete</option>
+                                    <option value="Netsprint">Netsprint</option>
+                                    <option value="MP">MP</option>
                                   </select>
                                 </div>
                                 <div className="flex-1 min-w-[150px]">
@@ -574,11 +738,55 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                       })}
                     </div>
                   )}
+
+                  {/* Save Pricing Board */}
+                  {pricingRules.length > 0 && (
+                    <div className="mt-6 flex justify-end">
+                      <button
+                        onClick={savePricingBoard}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-bold rounded-xl shadow-sm transition-all"
+                      >
+                        <Save className="w-4 h-4 text-indigo-600" />
+                        Enregistrer comme modèle de planche
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
               {activeTab === 'PRODUCTION' && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  
+                  {/* Load Production Model */}
+                  <div className="mb-6 p-4 bg-fuchsia-50 rounded-2xl border border-fuchsia-100 flex items-center justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-fuchsia-900 mb-1">Charger un modèle de production</h4>
+                      <p className="text-xs font-medium text-fuchsia-700/70">Sélectionnez un modèle pré-enregistré pour importer ses phases et tâches.</p>
+                    </div>
+                    <div className="flex-1 max-w-sm flex gap-2">
+                      <select
+                        value={selectedProductionModelId}
+                        onChange={(e) => setSelectedProductionModelId(e.target.value)}
+                        className="flex-1 bg-white border border-fuchsia-200 text-slate-900 text-sm font-bold rounded-xl px-3 py-2 focus:ring-2 focus:ring-fuchsia-500/20 disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={!productionModels || productionModels.length === 0}
+                      >
+                        <option value="">
+                          {(!productionModels || productionModels.length === 0) ? "Aucun modèle enregistré" : "Sélectionner un modèle..."}
+                        </option>
+                        {productionModels && productionModels.map(m => (
+                          <option key={m.id} value={m.id}>{m.name} ({m.phases.length} phases)</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => loadProductionModel(selectedProductionModelId)}
+                        disabled={!selectedProductionModelId}
+                        className="px-4 py-2 bg-fuchsia-600 text-white font-bold text-sm rounded-xl hover:bg-fuchsia-700 disabled:opacity-50 transition-colors shrink-0"
+                      >
+                        Charger
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                     <span className="w-8 h-8 rounded-lg bg-fuchsia-100 text-fuchsia-600 flex items-center justify-center text-sm">4</span>
@@ -680,6 +888,19 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                         ))}
                       </select>
                     </div>
+                    
+                    {/* Save Production Model */}
+                    {customPhases.length > 0 && (
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          onClick={saveProductionModel}
+                          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-bold rounded-xl shadow-sm transition-all"
+                        >
+                          <Save className="w-4 h-4 text-fuchsia-600" />
+                          Enregistrer comme modèle de production
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

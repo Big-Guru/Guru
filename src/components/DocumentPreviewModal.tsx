@@ -62,14 +62,6 @@ export default function DocumentPreviewModal({
       // But we now have an edited draft. We would need to update docxGenerator to accept the draft directly.
       // For now, let's pass the draft to docxGenerator. We need to update docxGenerator.ts next.
       await generateWordDocument(type, editedDraft.documentNumber, client, project, encaissement, editedDraft);
-      
-      // Log history
-      addDocumentHistoryEvent(project.id, encaissement.id, {
-        date: new Date().toISOString(),
-        documentType: type,
-        action: 'Téléchargée (Word)',
-        draftSnapshot: editedDraft
-      });
     } catch (e) {
       alert("Erreur lors du téléchargement.");
     }
@@ -89,7 +81,7 @@ export default function DocumentPreviewModal({
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-900">Aperçu : {type === 'PROFORMA' ? 'Proforma' : 'Facture Déf.'}</h2>
+              <h2 className="text-lg font-black text-slate-900">Aperçu : {type === 'PROFORMA' ? 'Proforma' : 'Facture Déf.'} (DEBUG Entité: '{project.entity}')</h2>
               <p className="text-xs font-bold text-slate-500">
                 Statut actuel : {
                   status === 'GENERATED' ? 'Brouillon (Modifiable)' :
@@ -185,7 +177,8 @@ export default function DocumentPreviewModal({
                             const newItems = [...editedDraft.items];
                             newItems[idx].price = newPrice;
                             const newTotalHT = newItems.reduce((acc, curr) => acc + curr.price, 0);
-                            const newTVA = newTotalHT * 0.19;
+                            const tvaRate = project.entity?.toLowerCase() === 'netsprint' ? 0 : 0.19;
+                            const newTVA = newTotalHT * tvaRate;
                             setEditedDraft({
                               ...editedDraft, 
                               items: newItems,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useStore } from '../store';
-import { Building2, MapPin, Users2, FileText, ArrowLeft, Plus, X, Award, Receipt, Clock, FolderKanban, Banknote, Calendar, CheckCircle2, Briefcase, Trash2 } from 'lucide-react';
+import { Building2, MapPin, Users2, FileText, ArrowLeft, Plus, X, Award, Receipt, Clock, FolderKanban, Banknote, Calendar, CheckCircle2, Briefcase, Trash2, Edit } from 'lucide-react';
 import { calculateAlerts } from '../lib/alerts';
 import { ProductType, ProductVersion } from '../types';
 import { cn } from '../lib/utils';
@@ -37,9 +37,9 @@ export default function ClientDetails() {
   const [newProjectData, setNewProjectData] = useState({
     name: '',
     departement: 'D1',
-    product: 'PAYE' as ProductType,
-    version: 'LIGHT' as ProductVersion,
-    processType: 'STANDARD' as ProcessType,
+    product: products.length > 0 ? products[0].name : 'PAYE',
+    version: (products.length > 0 && products[0].versions?.length) ? products[0].versions[0] : 'STANDARD',
+    processType: (products.length > 0 ? products[0].processType : 'STANDARD') as ProcessType,
     wilaya: '',
     ville: '',
     entity: 'Naltis',
@@ -170,8 +170,8 @@ export default function ClientDetails() {
     });
     setShowNewProject(false);
     setNewProjectData({ 
-      name: '', departement: 'D1', product: 'PAYE', version: 'LIGHT', processType: 'STANDARD', wilaya: '', ville: '', 
-      entity: 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [], maintenancePeriodicity: 'Annuelle',
+      name: '', departement: 'D1', product: products.length > 0 ? products[0].name : 'PAYE', version: products.length > 0 && products[0].versions?.length ? products[0].versions[0] : 'Standard', processType: products.length > 0 ? products[0].processType || 'STANDARD' : 'STANDARD', wilaya: '', ville: '', 
+      entity: products.length > 0 ? products[0].defaultEntity : 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [], maintenancePeriodicity: products.length > 0 ? products[0].maintenancePeriodicity : 'Annuelle',
       createdAt: new Date().toISOString().split('T')[0]
     });
   };
@@ -222,12 +222,19 @@ export default function ClientDetails() {
 
 
       {/* Header section with back navigation */}
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <Link to="/clients" className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Retour au portefeuille clients
         </Link>
-
+        
+        <Link 
+          to={`/clients/${client.id}/edit`} 
+          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-bold rounded-xl shadow-sm hover:bg-slate-50 transition-all duration-200 shrink-0"
+        >
+          <Edit className="w-4 h-4" />
+          Modifier les infos
+        </Link>
       </div>
 
       {/* Main client info details box */}
@@ -249,11 +256,10 @@ export default function ClientDetails() {
               <span>{client.address}, Wilaya {client.wilaya}</span>
             </div>
           </div>
-
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mt-4">
             <div className="inline-flex items-center gap-2 bg-white/60 backdrop-blur-sm px-4 py-2 rounded-2xl border border-white text-xs font-extrabold text-slate-700 shadow-sm">
                <Users2 className="w-4 h-4 text-indigo-500 shrink-0" />
-              <span>{client.effectif} {client.effectifType === 'UNIVERSITE' ? 'Université' : 'EH/DA'}</span>
+              <span>{client.effectif} {client.effectifType === 'PRIVE' ? 'Privé' : client.effectifType === 'PUBLIC' ? 'Public' : client.effectifType === 'UNIVERSITE' ? 'Université' : 'EH/DA'}</span>
             </div>
             
             {/* Fiscal metadata tags */}
@@ -299,8 +305,8 @@ export default function ClientDetails() {
                       name: '',
                       departement: firstProd.departement,
                       product: firstProd.name as any,
-                      version: 'LIGHT',
-                      processType: 'STANDARD',
+                      version: (firstProd.versions && firstProd.versions.length > 0) ? firstProd.versions[0] : 'Standard',
+                      processType: firstProd.processType || 'STANDARD',
                       wilaya: '',
                       ville: '',
                       entity: firstProd.defaultEntity,
@@ -313,7 +319,7 @@ export default function ClientDetails() {
                     });
                   } else {
                     setNewProjectData({ 
-                      name: '', departement: 'D1', product: 'PAYE' as any, version: 'LIGHT', processType: 'STANDARD', wilaya: '', ville: '', 
+                      name: '', departement: 'D1', product: 'PAYE' as any, version: 'Standard', processType: 'STANDARD', wilaya: '', ville: '', 
                       entity: 'Naltis', mode: 'Acquisition', phase: 'Démarchage', status: 'Actif', technique: [], maintenancePeriodicity: 'Annuelle',
                       createdAt: new Date().toISOString().split('T')[0]
                     });

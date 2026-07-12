@@ -90,6 +90,7 @@ export const generateWordDocument = async (
       prix_ht: formatCurrency(prixHT),
       tva: formatCurrency(tva),
       prix_ttc: formatCurrency(prixTTC),
+      prix_ht_lettres: `${writtenNumber(Math.floor(prixHT))} dinars algériens${(prixHT % 1) > 0 ? ` et ${Math.round((prixHT % 1) * 100)} centimes` : ''}`.replace(/^\w/, (c) => c.toUpperCase()),
       prix_ttc_lettres: `${writtenNumber(Math.floor(prixTTC))} dinars algériens${(prixTTC % 1) > 0 ? ` et ${Math.round((prixTTC % 1) * 100)} centimes` : ''}`.replace(/^\w/, (c) => c.toUpperCase()),
       date: new Date().toLocaleDateString('fr-FR'),
       // Add items array for dynamic multi-line looping in the Word file

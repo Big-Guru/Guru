@@ -97,9 +97,9 @@ export default function ClientsList() {
                         {client.wilaya ? `Wilaya: ${client.wilaya}` : 'Wilaya non définie'}
                       </span>
                       
-                      <div className="flex justify-between items-end">
+                      <div className="flex justify-between items-center">
                         <div className="flex gap-1.5 relative w-[60%] text-xs font-bold text-white/90">
-                          {client.effectif} {client.effectifType === 'UNIVERSITE' ? 'Université' : 'EH/DA'}
+                          {client.effectif} {client.effectifType === 'PRIVE' ? 'Privé' : client.effectifType === 'PUBLIC' ? 'Public' : client.effectifType === 'UNIVERSITE' ? 'Université' : 'EH/DA'}
                         </div>
                         <div className="font-black text-xs text-white/90 bg-black/10 px-2 py-1 rounded-lg backdrop-blur-md">
                           {clientProjects.length} PROJETS

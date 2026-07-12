@@ -52,12 +52,20 @@ interface AppState {
   missions: Mission[];
   products: ProductConfig[];
   pricingModels: PricingModel[];
+  productionModels: ProductionModel[];
+  pricingBoards: PricingBoard[];
   setClients: (clients: Client[]) => void;
   setProjects: (projects: Project[]) => void;
   setMissions: (missions: Mission[]) => void;
   setProducts: (products: ProductConfig[]) => void;
+  setProductionModels: (models: ProductionModel[]) => void;
+  setPricingBoards: (boards: PricingBoard[]) => void;
   addPricingModel: (model: PricingModel) => void;
   deletePricingModel: (id: string) => void;
+  addProductionModel: (model: Omit<ProductionModel, 'id'>) => void;
+  deleteProductionModel: (id: string) => void;
+  addPricingBoard: (board: Omit<PricingBoard, 'id'>) => void;
+  deletePricingBoard: (id: string) => void;
   addProduct: (product: Omit<ProductConfig, 'id'>) => void;
   updateProduct: (id: string, data: Partial<ProductConfig>) => void;
   deleteProduct: (id: string) => void;
@@ -110,7 +118,11 @@ export const useStore = create<AppState>()(
       dossiersPaiement: [],
       products: [],
       pricingModels: [],
+      productionModels: [],
+      pricingBoards: [],
       setClients: (clients) => set({ clients }),
+      setProductionModels: (models) => set({ productionModels: models }),
+      setPricingBoards: (boards) => set({ pricingBoards: boards }),
       setProjects: (projects) => set({ projects }),
       setMissions: (missions) => set({ missions }),
       setDossiersPaiement: (dossiersPaiement) => set({ dossiersPaiement }),
@@ -125,6 +137,60 @@ export const useStore = create<AppState>()(
         return { pricingModels: [...models, model] };
       }),
       deletePricingModel: (id) => set((state) => ({ pricingModels: (state.pricingModels || []).filter(m => m.id !== id) })),
+      addProductionModel: async (modelData) => {
+        const id = uuidv4();
+        const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+        const ownerId = auth.currentUser?.uid;
+        const newModel = { ...modelData, id, ownerId };
+
+        if (ownerId) {
+          try {
+            await setDoc(doc(db, 'productionModels', id), newModel);
+            return;
+          } catch (e) {
+            handleFirestoreError(e, OperationType.CREATE, 'productionModels');
+          }
+        }
+        set((state) => ({ productionModels: [...(state.productionModels || []), newModel] }));
+      },
+      deleteProductionModel: async (id) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        try {
+          await deleteDoc(doc(db, 'productionModels', id));
+        } catch (e) {
+          handleFirestoreError(e, OperationType.DELETE, `productionModels/${id}`);
+        }
+        set((state) => ({ productionModels: (state.productionModels || []).filter((m) => m.id !== id) }));
+      },
+      addPricingBoard: async (boardData) => {
+        const id = uuidv4();
+        const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+        const ownerId = auth.currentUser?.uid;
+        const newBoard = { ...boardData, id, ownerId };
+
+        if (ownerId) {
+          try {
+            await setDoc(doc(db, 'pricingBoards', id), newBoard);
+            return;
+          } catch (e) {
+            handleFirestoreError(e, OperationType.CREATE, 'pricingBoards');
+          }
+        }
+        set((state) => ({ pricingBoards: [...(state.pricingBoards || []), newBoard] }));
+      },
+      deletePricingBoard: async (id) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        try {
+          await deleteDoc(doc(db, 'pricingBoards', id));
+        } catch (e) {
+          handleFirestoreError(e, OperationType.DELETE, `pricingBoards/${id}`);
+        }
+        set((state) => ({ pricingBoards: (state.pricingBoards || []).filter((b) => b.id !== id) }));
+      },
       setProducts: (products) => {
         // Migration logic for old products to dynamic criteria
         const migratedProducts = products.map(prod => {

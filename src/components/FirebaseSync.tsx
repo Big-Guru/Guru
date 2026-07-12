@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { Client, Project, Mission } from '../types';
 
 export default function FirebaseSync() {
-  const { setClients, setProjects, setMissions, setDossiersPaiement, setProducts } = useStore();
+  const { setClients, setProjects, setMissions, setDossiersPaiement, setProducts, setProductionModels, setPricingBoards } = useStore();
 
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
@@ -61,17 +61,39 @@ export default function FirebaseSync() {
         setProducts(productsList);
       }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
 
+      // Sync Production Models
+      const qProductionModels = query(collection(db, 'productionModels'));
+      const unsubProductionModels = onSnapshot(qProductionModels, (snapshot) => {
+        const modelsList: any[] = [];
+        snapshot.forEach(doc => {
+          modelsList.push({ id: doc.id, ...doc.data() });
+        });
+        setProductionModels(modelsList);
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'productionModels'));
+
+      // Sync Pricing Boards
+      const qPricingBoards = query(collection(db, 'pricingBoards'));
+      const unsubPricingBoards = onSnapshot(qPricingBoards, (snapshot) => {
+        const boardsList: any[] = [];
+        snapshot.forEach(doc => {
+          boardsList.push({ id: doc.id, ...doc.data() });
+        });
+        setPricingBoards(boardsList);
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'pricingBoards'));
+
       return () => {
         unsubClients();
         unsubProjects();
         unsubMissions();
         unsubDossiers();
         unsubProducts();
+        unsubProductionModels();
+        unsubPricingBoards();
       };
     });
 
     return () => unsubscribeAuth();
-  }, [setClients, setProjects, setMissions, setProducts]);
+  }, [setClients, setProjects, setMissions, setProducts, setProductionModels, setPricingBoards]);
 
   return null;
 }

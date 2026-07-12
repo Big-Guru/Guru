@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store';
-import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power, PowerOff } from 'lucide-react';
+import { ArrowLeft, Plus, X, Trash2, Calendar, User, Phone, Mail, FileText, CheckCircle, CheckCircle2, Clock, Trash, FolderKanban, Edit3, Banknote, Power, PowerOff, ChevronDown } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { ProjectTask, Contract, ProjectContact, DocumentTrack, DocumentDraft, ProductVersion } from '../types';
 import { generateWordDocument } from '../lib/docxGenerator';
@@ -63,6 +63,7 @@ export default function ProjectDetails() {
   const [showContractManager, setShowContractManager] = useState(false);
   const [contractModalTab, setContractModalTab] = useState<'production' | 'encaissement'>('production');
   const [showFacturation, setShowFacturation] = useState<boolean | string>(false);
+  const [expandedPanels, setExpandedPanels] = useState({ rapports: false, historique: true, documents: false });
   const [dossierToDissociate, setDossierToDissociate] = useState<string | null>(null);
   const [selectedMergeCandidate, setSelectedMergeCandidate] = useState<string>('none');
   const [previewModalConfig, setPreviewModalConfig] = useState<{
@@ -335,6 +336,16 @@ export default function ProjectDetails() {
   contractsList = sortedContracts;
   const contactsList = project.contacts || [];
   const historyList = project.history || [];
+  const reportsHistory = (project.contracts || []).flatMap(c => 
+    (c.phases || []).flatMap(p => 
+      (p.tasks || []).filter(t => t.reports && t.reports.trim().length > 0).map(t => ({
+        id: t.id,
+        date: t.date || c.startDate || project.createdAt,
+        title: t.name,
+        report: t.reports,
+      }))
+    )
+  ).sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
   const currentContract = contractsList.find(c => c.id === selectedContractId) || contractsList.find(c => c.status !== 'DONE') || contractsList[0];
 
   const handleAddContract = (e: React.FormEvent) => {
@@ -1105,71 +1116,123 @@ export default function ProjectDetails() {
         <div className="w-full xl:w-80 shrink-0 relative">
           {/* Panneau droit : Sticky Content */}
           <div className="flex flex-col gap-6 sticky top-6 max-h-[calc(100vh-4rem)] overflow-y-auto pr-1 pb-4 z-50">
+          {/* Panneau droit : Historique des rapports */}
           <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
-            <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-indigo-600 block shadow-sm" />
-              Historique
-            </h3>
-            <div className="relative pl-5 border-l-2 border-indigo-100 py-2 space-y-4">
-              {historyList.slice().reverse().map(h => (
-                <div key={h.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
-                  <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-white shadow-md block" />
-                  <p className="text-[9px] font-bold text-slate-450 uppercase tracking-wide">{h.date}</p>
-                  <p className="text-xs font-bold text-slate-800 leading-snug">{h.message}</p>
+            <div 
+              className="flex justify-between items-center cursor-pointer select-none group"
+              onClick={() => setExpandedPanels(prev => ({ ...prev, rapports: !prev.rapports }))}
+            >
+              <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2 group-hover:text-blue-600 transition-colors">
+                <span className="h-2.5 w-2.5 rounded-full bg-orange-500 block shadow-sm" />
+                Historique des rapports
+              </h3>
+              <ChevronDown className={cn("w-5 h-5 text-slate-400 transition-transform duration-300", expandedPanels.rapports ? "rotate-180" : "")} />
+            </div>
+            <div className={cn("grid transition-all duration-300 ease-in-out", expandedPanels.rapports ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0 m-0")}>
+              <div className="overflow-hidden px-6 -mx-6">
+                <div className="relative pl-5 border-l-2 border-orange-100 py-2 space-y-4">
+                  {reportsHistory.slice().reverse().map(h => (
+                    <div key={h.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
+                      <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-orange-400 border-2 border-white shadow-md block" />
+                      <p className="text-[9px] font-bold text-slate-450 uppercase tracking-wide">
+                        {h.date ? new Date(h.date).toLocaleDateString('fr-FR') : ''}
+                      </p>
+                      <p className="text-xs font-bold text-slate-800 leading-snug">{h.title}</p>
+                      <p className="text-xs text-slate-600 mt-2 whitespace-pre-wrap">{h.report}</p>
+                    </div>
+                  ))}
+                  {reportsHistory.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun rapport.</p>}
                 </div>
-              ))}
-              {historyList.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun historique.</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* Panneau droit : Historique */}
+          <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
+            <div 
+              className="flex justify-between items-center cursor-pointer select-none group"
+              onClick={() => setExpandedPanels(prev => ({ ...prev, historique: !prev.historique }))}
+            >
+              <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2 group-hover:text-blue-600 transition-colors">
+                <span className="h-2.5 w-2.5 rounded-full bg-indigo-600 block shadow-sm" />
+                Historique
+              </h3>
+              <ChevronDown className={cn("w-5 h-5 text-slate-400 transition-transform duration-300", expandedPanels.historique ? "rotate-180" : "")} />
+            </div>
+            <div className={cn("grid transition-all duration-300 ease-in-out", expandedPanels.historique ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0 m-0")}>
+              <div className="overflow-hidden px-6 -mx-6">
+                <div className="relative pl-5 border-l-2 border-indigo-100 py-2 space-y-4">
+                  {historyList.slice().reverse().map(h => (
+                    <div key={h.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
+                      <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-white shadow-md block" />
+                      <p className="text-[9px] font-bold text-slate-450 uppercase tracking-wide">{h.date}</p>
+                      <p className="text-xs font-bold text-slate-800 leading-snug">{h.message}</p>
+                    </div>
+                  ))}
+                  {historyList.length === 0 && <p className="text-xs text-slate-450 italic py-4">Aucun historique.</p>}
+                </div>
+              </div>
             </div>
           </div>
           
           {/* Panneau droit : Historique des Documents */}
           <div className="bg-slate-50/50 border border-slate-200/70 rounded-3xl p-6 shadow-xl shadow-slate-100/40 space-y-5">
-            <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-blue-600 block shadow-sm" />
-              Historique des Documents
-            </h3>
-            <div className="relative pl-5 border-l-2 border-blue-100 py-2 space-y-4">
-              {(project.encaissements || []).flatMap(e => e.documentHistory || []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice().reverse().map(dh => (
-                <div key={dh.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
-                  <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-blue-500 border-2 border-white shadow-md block" />
-                  <div className="flex justify-between items-start">
-                    <div className="flex flex-col gap-1 w-full">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 uppercase">
-                          {dh.documentType === 'PROFORMA' ? 'Proforma' : 'Facture'} N° {dh.draftSnapshot?.documentNumber || '...'}
-                        </span>
+            <div 
+              className="flex justify-between items-center cursor-pointer select-none group"
+              onClick={() => setExpandedPanels(prev => ({ ...prev, documents: !prev.documents }))}
+            >
+              <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2 group-hover:text-blue-600 transition-colors">
+                <span className="h-2.5 w-2.5 rounded-full bg-blue-600 block shadow-sm" />
+                Historique des Documents
+              </h3>
+              <ChevronDown className={cn("w-5 h-5 text-slate-400 transition-transform duration-300", expandedPanels.documents ? "rotate-180" : "")} />
+            </div>
+            <div className={cn("grid transition-all duration-300 ease-in-out", expandedPanels.documents ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0 m-0")}>
+              <div className="overflow-hidden px-6 -mx-6">
+                <div className="relative pl-5 border-l-2 border-blue-100 py-2 space-y-4">
+                  {(project.encaissements || []).flatMap(e => e.documentHistory || []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice().reverse().map(dh => (
+                    <div key={dh.id} className="relative bg-white border border-slate-200/70 p-3.5 rounded-2xl shadow-sm space-y-1">
+                      <span className="absolute -left-[28px] top-4.5 h-3 w-3 rounded-full bg-blue-500 border-2 border-white shadow-md block" />
+                      <div className="flex justify-between items-start">
+                        <div className="flex flex-col gap-1 w-full">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 uppercase">
+                              {dh.documentType === 'PROFORMA' ? 'Proforma' : 'Facture'} N° {dh.draftSnapshot?.documentNumber || '...'}
+                            </span>
+                          </div>
+                          <p className="text-xs font-bold text-slate-800 leading-snug">
+                            {dh.action}{dh.user ? ` par : ${dh.user}` : ''}
+                          </p>
+                          <p className="text-[10px] font-semibold text-slate-500 mt-0.5">
+                            Le {new Date(dh.date).toLocaleDateString('fr-FR')} à {new Date(dh.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        {dh.draftSnapshot && (
+                          <button
+                            onClick={() => {
+                              const enc = project.encaissements?.find(e => e.documentHistory?.some(h => h.id === dh.id));
+                              if (!enc) return;
+                              setPreviewModalConfig({
+                                isOpen: true,
+                                type: dh.documentType as 'PROFORMA' | 'FACTURE',
+                                encaissementId: enc.id,
+                                draftSnapshot: dh.draftSnapshot,
+                                isReadOnly: true,
+                                readOnlyStatus: dh.action
+                              });
+                            }}
+                            className="ml-3 shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors self-center bg-slate-50 border border-slate-100"
+                            title="Visualiser ce document"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
-                      <p className="text-xs font-bold text-slate-800 leading-snug">
-                        {dh.action}{dh.user ? ` par : ${dh.user}` : ''}
-                      </p>
-                      <p className="text-[10px] font-semibold text-slate-500 mt-0.5">
-                        Le {new Date(dh.date).toLocaleDateString('fr-FR')} à {new Date(dh.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
                     </div>
-                    {dh.draftSnapshot && (
-                      <button
-                        onClick={() => {
-                          const enc = project.encaissements?.find(e => e.documentHistory?.some(h => h.id === dh.id));
-                          if (!enc) return;
-                          setPreviewModalConfig({
-                            isOpen: true,
-                            type: dh.documentType as 'PROFORMA' | 'FACTURE',
-                            encaissementId: enc.id,
-                            draftSnapshot: dh.draftSnapshot,
-                            isReadOnly: true,
-                            readOnlyStatus: dh.action
-                          });
-                        }}
-                        className="ml-3 shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors self-center bg-slate-50 border border-slate-100"
-                        title="Visualiser ce document"
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
+                  ))}
+                  {(!project.encaissements || project.encaissements.flatMap(e => e.documentHistory || []).length === 0) && <p className="text-xs text-slate-450 italic py-4">Aucun document tracé.</p>}
                 </div>
-              ))}
-              {(!project.encaissements || project.encaissements.flatMap(e => e.documentHistory || []).length === 0) && <p className="text-xs text-slate-450 italic py-4">Aucun document tracé.</p>}
+              </div>
             </div>
           </div>
         </div>
@@ -1859,11 +1922,13 @@ export default function ProjectDetails() {
                       className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value="" disabled>Version</option>
-                      <option value="ULTRALIGHT">UltraLight</option>
-                      <option value="LIGHT">Light</option>
-                      <option value="INTERMEDIATE">Intermediate</option>
-                      <option value="ADVANCED">Advanced</option>
-                      <option value="GLOBAL">Global</option>
+                      {(() => {
+                        const selectedProd = products.find(p => p.name === newEncaissementProduct);
+                        const displayVersions = (selectedProd?.versions && selectedProd.versions.length > 0) ? selectedProd.versions : ['Standard'];
+                        return displayVersions.map(v => (
+                          <option key={v} value={v}>{v}</option>
+                        ));
+                      })()}
                     </select>
                   </div>
                 </div>
@@ -2224,7 +2289,7 @@ export default function ProjectDetails() {
                           <button
                             onClick={() => {
                               if (window.confirm("Voulez-vous vraiment réinitialiser cette proforma ? (Cela effacera le brouillon actuel)")) {
-                                updateEncaissement(project.id, enc.id, { proforma: { status: 'PENDING', draft: undefined } });
+                                updateEncaissement(project.id, enc.id, { proforma: { status: 'PENDING', draft: null as any } });
                               }
                             }}
                             className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
@@ -2316,7 +2381,7 @@ export default function ProjectDetails() {
                           <button
                             onClick={() => {
                               if (window.confirm("Voulez-vous vraiment réinitialiser cette facture ? (Cela effacera le brouillon actuel)")) {
-                                updateEncaissement(project.id, enc.id, { facture: { status: 'PENDING', draft: undefined } });
+                                updateEncaissement(project.id, enc.id, { facture: { status: 'PENDING', draft: null as any } });
                               }
                             }}
                             className="px-5 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-xl text-xs font-bold transition-all"
@@ -2621,22 +2686,72 @@ export default function ProjectDetails() {
             const p = projects.find(pr => pr.id === e.projectId);
             const prod = p?.product || project.product;
             const vers = p?.version || project.version;
-            const price = getPrice(prod, vers, e.mode, client, project);
+            const priceMode = (e.mode === 'Acquisition' || e.mode === 'Maintenance') ? e.mode : 'Acquisition';
+            const basePrice = getPrice(prod, vers, priceMode, client, project, e.pricingParameters);
+            let price = basePrice;
+            
+            if (e.encaissementType === 'AVANCE') {
+               const pct = e.percentage || 30;
+               price = basePrice * (pct / 100);
+            } else if (e.encaissementType === 'TOTAL') {
+               if (e.contractId) {
+                  const paidAvances = (project.encaissements || []).filter(other => 
+                     other.contractId === e.contractId && 
+                     other.encaissementType === 'AVANCE' && 
+                     other.status === 'DONE'
+                  );
+                  let totalPaid = 0;
+                  paidAvances.forEach(pa => {
+                     const paPct = pa.percentage || 30;
+                     totalPaid += basePrice * (paPct / 100);
+                  });
+                  price = Math.max(0, basePrice - totalPaid);
+               }
+            } else if (e.mode === 'Indépendant') {
+               price = basePrice;
+            }
+
             totalHT += price;
 
-            const versionStr = vers ? `, Version ${vers}` : '';
-            const title = `Logiciel ${prod}${versionStr}`;
-            const subtitle = e.mode === 'Acquisition' ? 'Acquisition' : `Maintenance ${e.year ? `Année ${e.year}` : ''}`;
-            let description = `${title}\n${subtitle}\n• Monitoring régulier\n• Mises à jour\n• Téléassistance annuelle (Heures de bureau, Du Dimanche au Jeudi)\n• Télé-intervention annuelle (Heures de bureau, Du Dimanche au Jeudi)`.trim();
+            const customDesignation = getDesignation(prod, vers, priceMode, client, project, e.pricingParameters);
+            
+            let description = '';
+            
+            if (customDesignation) {
+               description = customDesignation;
+               if (e.encaissementType === 'AVANCE') {
+                  description += `\nAvance (${e.percentage || 30}%)`;
+               } else if (e.encaissementType === 'TOTAL') {
+                  const paidAvances = e.contractId ? (project.encaissements || []).filter(other => other.contractId === e.contractId && other.encaissementType === 'AVANCE' && other.status === 'DONE') : [];
+                  if (paidAvances.length > 0) {
+                     description += `\nSolde (Déduction des avances)`;
+                  }
+               }
+            } else {
+               const prodConfig = useStore.getState().products.find(p => p.name.toLowerCase() === prod.toLowerCase());
+               let debugInfo = `Désignation non configurée.\nRecherche: Produit='${prod}', Version='${vers}', Entité='${project.entity}'\n`;
+               if (prodConfig && prodConfig.pricingRules) {
+                  debugInfo += `${prodConfig.pricingRules.length} règles trouvées:\n`;
+                  prodConfig.pricingRules.forEach((r, i) => {
+                     debugInfo += `- Règle ${i+1} (Vers='${r.version}', Ent='${r.entity}'): `;
+                     if (r.version !== vers) debugInfo += `Version '${r.version}' != '${vers}'. `;
+                     if (r.entity !== project.entity) debugInfo += `Entité '${r.entity}' != '${project.entity}'. `;
+                     if (r.conditions && Object.keys(r.conditions).length > 0) debugInfo += `Conditions dynamiques présentes. `;
+                     if (r.effectifType !== undefined) debugInfo += `effectifType '${r.effectifType}'. `;
+                  });
+               }
+               description = debugInfo;
+            }
 
             if (price === 0) {
                const prodConfig = useStore.getState().products.find(p => p.name.toLowerCase() === prod.toLowerCase());
-               description += `\n\n[ERREUR PRIX: 0 DA] Vérifiez la Règle Tarifaire.\nProduit cherché: '${prod}' (Version: '${vers}').\nEntité projet: '${project.entity}'.\nClient: Effectif=${client?.effectif}, Type=${client?.effectifType}.`;
+               let warnMsg = `[ERREUR PRIX: 0 DA] Vérifiez la Règle Tarifaire.\nProduit cherché: '${prod}' (Version: '${vers}').\nEntité projet: '${project.entity}'.\nClient: Effectif=${client?.effectif}, Type=${client?.effectifType}.`;
                if (prodConfig) {
-                 description += `\nRègles trouvées pour ce produit : ${prodConfig.pricingRules.length}\nVeuillez vérifier qu'une des règles correspond EXACTEMENT à ces critères.`;
+                 warnMsg += `\nRègles trouvées pour ce produit : ${prodConfig.pricingRules.length}\nVeuillez vérifier qu'une des règles correspond EXACTEMENT à ces critères.`;
                } else {
-                 description += `\nLe produit '${prod}' n'a pas été trouvé.`;
+                 warnMsg += `\nLe produit '${prod}' n'a pas été trouvé.`;
                }
+               console.warn(warnMsg);
             }
 
             return {
@@ -2645,7 +2760,8 @@ export default function ProjectDetails() {
             };
           });
 
-          const totalTVA = totalHT * 0.19;
+          const tvaRate = project.entity?.toLowerCase() === 'netsprint' ? 0 : 0.19;
+          const totalTVA = totalHT * tvaRate;
           const totalTTC = totalHT + totalTVA;
 
           draft = {
