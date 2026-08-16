@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { Client, Project, Mission } from '../types';
 
 export default function FirebaseSync() {
-  const { setClients, setProjects, setMissions, setDossiersPaiement, setProducts, setProductionModels, setPricingBoards } = useStore();
+  const { setClients, setProjects, setMissions, setDossiersPaiement, setProducts, setProductionModels, setPricingBoards, setPricingModels } = useStore();
 
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
@@ -81,6 +81,16 @@ export default function FirebaseSync() {
         setPricingBoards(boardsList);
       }, (error) => handleFirestoreError(error, OperationType.LIST, 'pricingBoards'));
 
+      // Sync Pricing Models
+      const qPricingModels = query(collection(db, 'pricingModels'));
+      const unsubPricingModels = onSnapshot(qPricingModels, (snapshot) => {
+        const modelsList: any[] = [];
+        snapshot.forEach(doc => {
+          modelsList.push({ id: doc.id, ...doc.data() });
+        });
+        setPricingModels(modelsList);
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'pricingModels'));
+
       return () => {
         unsubClients();
         unsubProjects();
@@ -89,11 +99,12 @@ export default function FirebaseSync() {
         unsubProducts();
         unsubProductionModels();
         unsubPricingBoards();
+        unsubPricingModels();
       };
     });
 
     return () => unsubscribeAuth();
-  }, [setClients, setProjects, setMissions, setProducts, setProductionModels, setPricingBoards]);
+  }, [setClients, setProjects, setMissions, setProducts, setProductionModels, setPricingBoards, setPricingModels]);
 
   return null;
 }

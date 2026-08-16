@@ -6,11 +6,11 @@ let aiInstance: GoogleGenAI | null = null;
 function getAi() {
   if (!aiInstance) {
     // Si la variable d'environnement n'est pas définie, vous pouvez coller votre clé ici
-    const HARDCODED_API_KEY = "AIzaSyCLzbEvRxkzPkZjz5GBXoWeUPgZ3dlxlkw";
+    const HARDCODED_API_KEY = process.env.VITE_GEMINI_API_KEY || "";
 
     const apiKey = process.env.GEMINI_API_KEY || HARDCODED_API_KEY;
 
-    if (!apiKey || apiKey.includes("VOTRE_CLE_API_ICI")) {
+    if (!apiKey || apiKey.includes("AQ.Ab8RN6Iw4CQgAOhGMRIZtde-kn3845Vvy9iSncCLVvb116K1-gI")) {
       throw new Error("Clé API Gemini manquante. Veuillez configurer GEMINI_API_KEY ou remplacer VOTRE_CLE_API_ICI dans aiService.ts.");
     }
     aiInstance = new GoogleGenAI({ apiKey });

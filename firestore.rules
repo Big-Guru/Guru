@@ -121,5 +121,11 @@ service cloud.firestore {
     match /productionModels/{modelId} {
       allow read, write: if isSignedIn();
     }
+    match /pricingBoards/{boardId} {
+      allow read, write: if isSignedIn();
+    }
+    match /pricingModels/{modelId} {
+      allow read, write: if isSignedIn();
+    }
   }
 }

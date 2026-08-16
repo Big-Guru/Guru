@@ -60,6 +60,7 @@ interface AppState {
   setProducts: (products: ProductConfig[]) => void;
   setProductionModels: (models: ProductionModel[]) => void;
   setPricingBoards: (boards: PricingBoard[]) => void;
+  setPricingModels: (models: PricingModel[]) => void;
   addPricingModel: (model: PricingModel) => void;
   deletePricingModel: (id: string) => void;
   addProductionModel: (model: Omit<ProductionModel, 'id'>) => void;
@@ -123,20 +124,49 @@ export const useStore = create<AppState>()(
       setClients: (clients) => set({ clients }),
       setProductionModels: (models) => set({ productionModels: models }),
       setPricingBoards: (boards) => set({ pricingBoards: boards }),
+      setPricingModels: (models) => set({ pricingModels: models }),
       setProjects: (projects) => set({ projects }),
       setMissions: (missions) => set({ missions }),
       setDossiersPaiement: (dossiersPaiement) => set({ dossiersPaiement }),
-      addPricingModel: (model) => set((state) => {
-        const models = state.pricingModels || [];
-        const existingIndex = models.findIndex(m => m.name.toLowerCase() === model.name.toLowerCase());
-        if (existingIndex >= 0) {
-          const newModels = [...models];
-          newModels[existingIndex] = { ...model, id: models[existingIndex].id };
-          return { pricingModels: newModels };
+      addPricingModel: async (model) => {
+        const id = model.id || uuidv4();
+        const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+        const ownerId = auth.currentUser?.uid;
+        const newModel = { ...model, id, ownerId: ownerId || null };
+
+        set((state) => {
+          const models = state.pricingModels || [];
+          const index = models.findIndex(m => m.id === id);
+          if (index >= 0) {
+            const newModels = [...models];
+            newModels[index] = newModel;
+            return { pricingModels: newModels };
+          }
+          return { pricingModels: [...models, newModel] };
+        });
+
+        if (ownerId) {
+          try {
+            await setDoc(doc(db, 'pricingModels', id), newModel);
+          } catch (e) {
+            // Revert on failure
+            set((state) => ({ pricingModels: (state.pricingModels || []).filter(m => m.id !== id) }));
+            handleFirestoreError(e, OperationType.CREATE, 'pricingModels');
+            throw e;
+          }
         }
-        return { pricingModels: [...models, model] };
-      }),
-      deletePricingModel: (id) => set((state) => ({ pricingModels: (state.pricingModels || []).filter(m => m.id !== id) })),
+      },
+      deletePricingModel: async (id) => {
+        const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        try {
+          await deleteDoc(doc(db, 'pricingModels', id));
+        } catch (e) {
+          handleFirestoreError(e, OperationType.DELETE, `pricingModels/${id}`);
+        }
+        set((state) => ({ pricingModels: (state.pricingModels || []).filter(m => m.id !== id) }));
+      },
       addProductionModel: async (modelData) => {
         const id = uuidv4();
         const { auth, db, handleFirestoreError, OperationType } = await import('./lib/firebase');
@@ -144,15 +174,26 @@ export const useStore = create<AppState>()(
         const ownerId = auth.currentUser?.uid;
         const newModel = { ...modelData, id, ownerId };
 
+        set((state) => {
+          const models = state.productionModels || [];
+          const index = models.findIndex(m => m.id === id);
+          if (index >= 0) {
+            const newModels = [...models];
+            newModels[index] = newModel;
+            return { productionModels: newModels };
+          }
+          return { productionModels: [...models, newModel] };
+        });
+
         if (ownerId) {
           try {
             await setDoc(doc(db, 'productionModels', id), newModel);
-            return;
           } catch (e) {
+            set((state) => ({ productionModels: (state.productionModels || []).filter(m => m.id !== id) }));
             handleFirestoreError(e, OperationType.CREATE, 'productionModels');
+            throw e;
           }
         }
-        set((state) => ({ productionModels: [...(state.productionModels || []), newModel] }));
       },
       deleteProductionModel: async (id) => {
         const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');
@@ -171,15 +212,26 @@ export const useStore = create<AppState>()(
         const ownerId = auth.currentUser?.uid;
         const newBoard = { ...boardData, id, ownerId };
 
+        set((state) => {
+          const boards = state.pricingBoards || [];
+          const index = boards.findIndex(b => b.id === id);
+          if (index >= 0) {
+            const newBoards = [...boards];
+            newBoards[index] = newBoard;
+            return { pricingBoards: newBoards };
+          }
+          return { pricingBoards: [...boards, newBoard] };
+        });
+
         if (ownerId) {
           try {
             await setDoc(doc(db, 'pricingBoards', id), newBoard);
-            return;
           } catch (e) {
+            set((state) => ({ pricingBoards: (state.pricingBoards || []).filter(b => b.id !== id) }));
             handleFirestoreError(e, OperationType.CREATE, 'pricingBoards');
+            throw e;
           }
         }
-        set((state) => ({ pricingBoards: [...(state.pricingBoards || []), newBoard] }));
       },
       deletePricingBoard: async (id) => {
         const { db, handleFirestoreError, OperationType } = await import('./lib/firebase');

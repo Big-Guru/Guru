@@ -274,8 +274,9 @@ export default function ProjectDetails() {
   };
 
   const [showNewContractModal, setShowNewContractModal] = useState(false);
-  const [newContractName, setNewContractName] = useState('');
-  const [newContractPrice, setNewContractPrice] = useState('');
+  const [newContractProduct, setNewContractProduct] = useState(project?.product || '');
+  const [newContractVersion, setNewContractVersion] = useState(project?.version || '');
+  const [newContractMode, setNewContractMode] = useState<CardMode>('Acquisition');
 
   const [showNewEncaissementModal, setShowNewEncaissementModal] = useState(false);
   const [newEncaissementType, setNewEncaissementType] = useState<'AVANCE' | 'TOTAL'>('AVANCE');
@@ -1759,38 +1760,82 @@ export default function ProjectDetails() {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={(e) => {
             e.preventDefault();
-            if (newContractName.trim()) {
-              addCustomContract(project.id, newContractName.trim(), newContractPrice ? parseFloat(newContractPrice) : undefined);
-              setNewContractName('');
-              setNewContractPrice('');
+            if (newContractProduct && newContractVersion && newContractMode) {
+              const price = getPrice(newContractProduct, newContractVersion as ProductVersion, newContractMode, client, project);
+              const name = `${newContractProduct} - ${newContractVersion} (${newContractMode})`;
+              addCustomContract(project.id, name, price);
               setShowNewContractModal(false);
+            } else {
+              alert('Veuillez sélectionner un produit, une version et un mode.');
             }
           }} className="bg-white border border-slate-200 shadow-2xl rounded-3xl p-6 relative w-full max-w-md">
             <button type="button" onClick={() => setShowNewContractModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
-            <h3 className="font-extrabold text-slate-900 text-base mb-5">Ajouter un contrat indépendant</h3>
+            <h3 className="font-extrabold text-slate-900 text-base mb-5">Ajouter un contrat</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Nom du contrat</label>
-                <input
-                  type="text"
-                  value={newContractName}
-                  onChange={e => setNewContractName(e.target.value)}
-                  placeholder="Ex: Matériel Serveur, Formation..."
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Produit</label>
+                <select
+                  value={newContractProduct}
+                  onChange={(e) => {
+                    setNewContractProduct(e.target.value);
+                    const prodConfig = products?.find(p => p.name === e.target.value);
+                    if (prodConfig && prodConfig.versions && prodConfig.versions.length > 0) {
+                      setNewContractVersion(prodConfig.versions[0]);
+                    } else {
+                      setNewContractVersion('');
+                    }
+                  }}
                   required
                   className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                >
+                  <option value="" disabled>Sélectionnez un produit...</option>
+                  {products?.map(p => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
               </div>
+
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Prix HT (DA) - Optionnel</label>
-                <input
-                  type="number"
-                  value={newContractPrice}
-                  onChange={e => setNewContractPrice(e.target.value)}
-                  placeholder="Ex: 50000"
-                  min="0"
-                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Version</label>
+                <select
+                  value={newContractVersion}
+                  onChange={(e) => setNewContractVersion(e.target.value)}
+                  required
+                  disabled={!newContractProduct}
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                >
+                  <option value="" disabled>Sélectionnez une version...</option>
+                  {products?.find(p => p.name === newContractProduct)?.versions?.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
               </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Mode</label>
+                <select
+                  value={newContractMode}
+                  onChange={(e) => setNewContractMode(e.target.value as CardMode)}
+                  required
+                  className="w-full text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="Acquisition">Acquisition</option>
+                  <option value="Maintenance">Maintenance</option>
+                  <option value="Annexe">Annexe</option>
+                  <option value="Maintenance offerte">Maintenance offerte</option>
+                </select>
+              </div>
+
+              {newContractProduct && newContractVersion && newContractMode && (
+                <div className="p-4 bg-indigo-50 rounded-xl mt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-bold text-indigo-900">Prix calculé (Planche tarifaire)</span>
+                    <span className="text-lg font-black text-indigo-700">
+                      {getPrice(newContractProduct, newContractVersion as ProductVersion, newContractMode, client, project).toLocaleString()} DA
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 pt-6 mt-4 border-t border-slate-100">
               <button type="button" onClick={() => setShowNewContractModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Annuler</button>

@@ -44,31 +44,56 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
   };
   const removeVersion = (index: number) => setVersions(versions.filter((_, i) => i !== index));
 
-  const savePricingModel = () => {
-    if (!pricingModelName.trim()) {
-      alert("Veuillez donner un nom au modèle pour l'enregistrer.");
-      return;
+  const handleSaveModel = async () => {
+    if (!pricingModelName.trim()) return;
+    
+    const existingModel = pricingModels.find(m => m.name.toLowerCase() === pricingModelName.toLowerCase());
+    if (existingModel) {
+      const confirm = window.confirm(`Le modèle "${pricingModelName}" existe déjà. Voulez-vous le mettre à jour ?`);
+      if (!confirm) return;
     }
-    const isUpdate = pricingModels.some(m => m.name.toLowerCase() === pricingModelName.toLowerCase());
-    addPricingModel({
-      id: uuidv4(),
-      name: pricingModelName,
+
+    const model: PricingModel = {
+      id: existingModel ? existingModel.id : uuidv4(),
+      name: pricingModelName.trim(),
       type: pricingModelType,
       option: pricingModelOption,
       versions
-    });
-    alert(isUpdate ? "Modèle mis à jour avec succès !" : "Modèle enregistré avec succès !");
+    };
+
+    try {
+      await addPricingModel(model);
+      alert(`Modèle "${model.name}" enregistré avec succès !`);
+    } catch (e) {
+      alert(`Erreur lors de l'enregistrement du modèle: ${e}`);
+    }
   };
 
-  const saveProductionModel = () => {
-    const modelName = window.prompt("Entrez le nom du modèle de production à sauvegarder :");
-    if (!modelName || !modelName.trim()) return;
+  const handleSaveProductionModel = async () => {
+    if (!productionModelName.trim()) return;
 
-    addProductionModel({
-      name: modelName.trim(),
-      phases: customPhases
-    });
-    alert("Modèle de production enregistré avec succès !");
+    if (customPhases.length === 0) {
+      alert("Veuillez ajouter au moins une phase.");
+      return;
+    }
+
+    const existingModel = productionModels?.find(m => m.name.toLowerCase() === productionModelName.trim().toLowerCase());
+    if (existingModel) {
+      const confirm = window.confirm(`Le modèle de production "${productionModelName}" existe déjà. Voulez-vous le mettre à jour ?`);
+      if (!confirm) return;
+    }
+
+    try {
+      await addProductionModel({
+        id: existingModel ? existingModel.id : uuidv4(),
+        name: productionModelName.trim(),
+        phases: customPhases
+      });
+      alert(`Modèle de production "${productionModelName}" enregistré avec succès !`);
+      setProductionModelName('');
+    } catch (e) {
+      alert(`Erreur lors de l'enregistrement du modèle de production: ${e}`);
+    }
   };
 
   const loadProductionModel = (modelId: string) => {
@@ -99,25 +124,44 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
       setPricingModelType(model.type);
       setPricingModelOption(model.option);
       setPricingModelName(model.name);
-      setVersions(model.versions);
+      setVersions(model.versions || []);
     }
   };
 
-  const savePricingBoard = () => {
-    const rulesToSave = pricingRules.filter(r => r.entity === activeEntityTab);
-    if (rulesToSave.length === 0) {
-      alert(`Il n'y a aucune règle pour ${activeEntityTab} à sauvegarder.`);
-      return;
-    }
-
+  const handleSaveBoard = async () => {
     const boardName = window.prompt(`Entrez le nom de la planche tarifaire pour ${activeEntityTab} :`);
     if (!boardName || !boardName.trim()) return;
 
-    addPricingBoard({
-      name: boardName.trim(),
-      rules: rulesToSave
-    });
-    alert(`Planche tarifaire enregistrée avec succès !`);
+    const currentRules = pricingRules.filter(r => r.entity === activeEntityTab);
+    if (currentRules.length === 0) {
+      alert("Aucune règle à enregistrer pour cette entité.");
+      return;
+    }
+
+    const existingBoard = pricingBoards?.find(b => b.name.toLowerCase() === boardName.trim().toLowerCase());
+    if (existingBoard) {
+      const confirm = window.confirm(`Une planche nommée "${existingBoard.name}" existe déjà. Voulez-vous mettre à jour les règles pour ${activeEntityTab} dans cette planche ?`);
+      if (!confirm) return;
+    }
+
+    // Merge rules if updating: keep rules from other entities, replace rules for activeEntityTab
+    const rulesToSave = existingBoard 
+      ? [
+          ...existingBoard.rules.filter(r => r.entity !== activeEntityTab),
+          ...currentRules
+        ]
+      : currentRules;
+
+    try {
+      await addPricingBoard({
+        id: existingBoard ? existingBoard.id : uuidv4(),
+        name: boardName.trim(),
+        rules: rulesToSave
+      });
+      alert(`Planche tarifaire enregistrée avec succès !`);
+    } catch (e) {
+      alert(`Erreur lors de l'enregistrement de la planche tarifaire: ${e}`);
+    }
   };
 
   const loadPricingBoard = (boardId: string) => {
@@ -493,7 +537,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                               className="flex-1 text-xs p-2 border border-slate-200 rounded-lg bg-white"
                             />
                             <button 
-                              onClick={savePricingModel}
+                              onClick={handleSaveModel}
                               className="px-3 py-2 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
                             >
                               <Save className="w-3 h-3" />
@@ -743,7 +787,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                   {pricingRules.length > 0 && (
                     <div className="mt-6 flex justify-end">
                       <button
-                        onClick={savePricingBoard}
+                        onClick={handleSaveBoard}
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-bold rounded-xl shadow-sm transition-all"
                       >
                         <Save className="w-4 h-4 text-indigo-600" />
@@ -893,7 +937,7 @@ export default function ProductFormModal({ product, onClose }: ProductFormModalP
                     {customPhases.length > 0 && (
                       <div className="mt-4 flex justify-end">
                         <button
-                          onClick={saveProductionModel}
+                          onClick={handleSaveProductionModel}
                           className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-bold rounded-xl shadow-sm transition-all"
                         >
                           <Save className="w-4 h-4 text-fuchsia-600" />
